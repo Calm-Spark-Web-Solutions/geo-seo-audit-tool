@@ -1,0 +1,48 @@
+import Link from "next/link";
+
+import { LoginForm } from "@/components/auth/LoginForm";
+import { Brand } from "@/components/layout/Brand";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6">
+      <Brand size="lg" />
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center">
+          <CardTitle>Sign in</CardTitle>
+          <CardDescription>
+            Welcome back. Sign in to manage your audits.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {error === "callback" ? (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              We couldn&apos;t complete that confirmation link. Please try
+              signing in or request a new link from sign up.
+            </p>
+          ) : null}
+          <LoginForm />
+        </CardContent>
+      </Card>
+      <Link
+        href="/"
+        className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+      >
+        Back to home
+      </Link>
+    </div>
+  );
+}
