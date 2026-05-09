@@ -29,7 +29,10 @@ export default async function InvitePage({
   if (!user) {
     const next = `/invite/${encodeURIComponent(token)}`;
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6">
+      <main
+        id="main"
+        className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6"
+      >
         <Brand size="lg" />
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
@@ -49,12 +52,15 @@ export default async function InvitePage({
             </Button>
           </CardContent>
         </Card>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6">
+    <main
+      id="main"
+      className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6"
+    >
       <Brand size="lg" />
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
@@ -67,6 +73,6 @@ export default async function InvitePage({
           <AcceptInviteForm token={token} />
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

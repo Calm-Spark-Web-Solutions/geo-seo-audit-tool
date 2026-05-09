@@ -36,10 +36,10 @@ export default async function DashboardLayout({
 
   return (
     <div className="grid min-h-screen grid-rows-[auto_1fr] bg-background">
-      <Topbar />
+      <Topbar companies={companies} />
       <div className="grid grid-cols-1 md:grid-cols-[15rem_1fr]">
         <Sidebar companies={companies} />
-        <main className="min-w-0 p-4 md:p-8">
+        <main id="main" className="min-w-0 p-4 md:p-8">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
             {children}
           </div>

@@ -15,6 +15,16 @@ const sizeClasses: Record<NonNullable<AvatarProps["size"]>, string> = {
   lg: "h-12 w-12 text-base",
 };
 
+// Pixel dimensions for the inner <img>. Mirrors `sizeClasses` (Tailwind:
+// h-7=28, h-9=36, h-12=48) and is set as `width`/`height` attributes so
+// the browser reserves the slot before the avatar URL resolves — avoids
+// CLS in the topbar / member rows on slow connections.
+const sizePx: Record<NonNullable<AvatarProps["size"]>, number> = {
+  sm: 28,
+  md: 36,
+  lg: 48,
+};
+
 export function Avatar({
   src,
   alt,
@@ -24,6 +34,7 @@ export function Avatar({
   ...props
 }: AvatarProps) {
   const initials = fallback.slice(0, 2).toUpperCase();
+  const dim = sizePx[size];
   return (
     <span
       className={cn(
@@ -39,7 +50,11 @@ export function Avatar({
         <img
           src={src}
           alt={alt ?? fallback}
+          width={dim}
+          height={dim}
           className="h-full w-full object-cover"
+          loading="lazy"
+          decoding="async"
         />
       ) : (
         <span aria-hidden>{initials}</span>

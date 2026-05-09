@@ -2,12 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CompanyForm } from "@/components/companies/CompanyForm";
+import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -31,12 +31,10 @@ export default async function EditCompanyPage({
 
   if (error) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Edit organization</CardTitle>
-          <CardDescription>{error.message}</CardDescription>
-        </CardHeader>
-      </Card>
+      <InlineErrorCard
+        title="Could not load organization"
+        description={error.message}
+      />
     );
   }
   if (!company) notFound();
@@ -61,7 +59,7 @@ export default async function EditCompanyPage({
       <div className="mx-auto w-full max-w-2xl">
         <Card>
           <CardHeader>
-            <CardTitle>Organization details</CardTitle>
+            <CardTitle className="text-base">Organization details</CardTitle>
           </CardHeader>
           <CardContent>
             <CompanyForm initial={typedCompany} />

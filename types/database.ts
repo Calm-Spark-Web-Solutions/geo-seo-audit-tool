@@ -44,6 +44,7 @@ export type Database = {
           ai_comment: string | null
           audit_id: string
           created_at: string | null
+          exclude_from_audit_score: boolean
           fixes: Json | null
           geo_results: Json | null
           id: string
@@ -56,6 +57,7 @@ export type Database = {
           ai_comment?: string | null
           audit_id: string
           created_at?: string | null
+          exclude_from_audit_score?: boolean
           fixes?: Json | null
           geo_results?: Json | null
           id?: string
@@ -68,6 +70,7 @@ export type Database = {
           ai_comment?: string | null
           audit_id?: string
           created_at?: string | null
+          exclude_from_audit_score?: boolean
           fixes?: Json | null
           geo_results?: Json | null
           id?: string
@@ -86,45 +89,131 @@ export type Database = {
           },
         ]
       }
+      audit_jobs: {
+        Row: {
+          id: string
+          audit_id: string
+          status: string
+          attempts: number
+          max_attempts: number
+          lease_until: string | null
+          last_error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          audit_id: string
+          status?: string
+          attempts?: number
+          max_attempts?: number
+          lease_until?: string | null
+          last_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          audit_id?: string
+          status?: string
+          attempts?: number
+          max_attempts?: number
+          lease_until?: string | null
+          last_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_jobs_audit_id_fkey"
+            columns: ["audit_id"]
+            isOneToOne: false
+            referencedRelation: "audits"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rate_limits: {
+        Row: {
+          key: string
+          window_start: string
+          count: number
+          updated_at: string
+        }
+        Insert: {
+          key: string
+          window_start?: string
+          count?: number
+          updated_at?: string
+        }
+        Update: {
+          key?: string
+          window_start?: string
+          count?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       audits: {
         Row: {
           community_id: string
           created_at: string | null
+          engine_version: number
           geo_score: number | null
           id: string
+          max_pages: number | null
           pages_crawled: number
           progress_total: number | null
           report_generated_at: string | null
           report_pdf_path: string | null
           score: number | null
           seo_score: number | null
+          shard_urls: string[] | null
+          site_wide_checks: Json | null
+          crux_field_checks: Json | null
+          near_duplicate_checks: Json | null
           status: string
+          target_urls: string[] | null
         }
         Insert: {
           community_id: string
           created_at?: string | null
+          engine_version?: number
           geo_score?: number | null
           id?: string
+          max_pages?: number | null
           pages_crawled?: number
           progress_total?: number | null
           report_generated_at?: string | null
           report_pdf_path?: string | null
           score?: number | null
           seo_score?: number | null
+          shard_urls?: string[] | null
+          site_wide_checks?: Json | null
+          crux_field_checks?: Json | null
+          near_duplicate_checks?: Json | null
           status?: string
+          target_urls?: string[] | null
         }
         Update: {
           community_id?: string
           created_at?: string | null
+          engine_version?: number
           geo_score?: number | null
           id?: string
+          max_pages?: number | null
           pages_crawled?: number
           progress_total?: number | null
           report_generated_at?: string | null
           report_pdf_path?: string | null
           score?: number | null
           seo_score?: number | null
+          shard_urls?: string[] | null
+          site_wide_checks?: Json | null
+          crux_field_checks?: Json | null
+          near_duplicate_checks?: Json | null
           status?: string
+          target_urls?: string[] | null
         }
         Relationships: [
           {
@@ -140,21 +229,27 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string | null
+          facility_type: string | null
           id: string
+          manual_check_results: Json | null
           name: string
           website_url: string
         }
         Insert: {
           company_id: string
           created_at?: string | null
+          facility_type?: string | null
           id?: string
+          manual_check_results?: Json | null
           name: string
           website_url: string
         }
         Update: {
           company_id?: string
           created_at?: string | null
+          facility_type?: string | null
           id?: string
+          manual_check_results?: Json | null
           name?: string
           website_url?: string
         }
@@ -236,7 +331,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      consume_rate_limit: {
+        Args: {
+          p_key: string
+          p_max: number
+          p_window_seconds: number
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

@@ -6,6 +6,9 @@ import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+// Literal required by Next.js's route-segment-config analyzer.
+// See lib/runtime/region.ts for the canonical region reference.
+export const preferredRegion = "iad1";
 
 export async function GET(
   _request: Request,
@@ -29,7 +32,14 @@ export async function GET(
   let buffer: Buffer;
   try {
     buffer = await renderAuditPdfBuffer(payload);
-  } catch {
+  } catch (err) {
+    // The user message stays generic, but the underlying cause is logged
+    // server-side so Turbopack/Node bundling regressions stop being silent.
+    console.error("renderAuditPdfBuffer failed", {
+      auditId: id,
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return NextResponse.json(
       { error: "Failed to render PDF" },
       { status: 500 },

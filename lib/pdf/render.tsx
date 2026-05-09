@@ -1,14 +1,39 @@
-import { pdf } from "@react-pdf/renderer";
+import { renderToBuffer } from "@react-pdf/renderer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { COMMUNITY_MANUAL_ITEMS } from "@/lib/checklists/community-manual";
 import { AuditReportPdfDocument } from "@/lib/pdf/report";
-import type { Audit, AuditPage, Community, Company } from "@/types";
+import type {
+  Audit,
+  AuditPage,
+  AuditCheck,
+  Community,
+  CommunityManualResults,
+  Company,
+  ManualChecklistPdfRow,
+} from "@/types";
 
 export interface AuditPdfPayload {
   audit: Audit;
   pages: AuditPage[];
   community: Community | null;
   company: Company | null;
+  siteWideChecks: AuditCheck[];
+  cruxFieldChecks: AuditCheck[];
+  nearDuplicateChecks: AuditCheck[];
+  manualChecklistRows: ManualChecklistPdfRow[];
+}
+
+function buildManualPdfRows(community: Community | null): ManualChecklistPdfRow[] {
+  const saved: CommunityManualResults = community?.manual_check_results ?? {};
+  return COMMUNITY_MANUAL_ITEMS.map((item) => ({
+    key: item.key,
+    category: item.category,
+    label: item.label,
+    helper: item.helper,
+    status: saved[item.key]?.status ?? "unreviewed",
+    notes: (saved[item.key]?.notes ?? "").trim(),
+  }));
 }
 
 /**
@@ -23,7 +48,7 @@ export async function loadAuditPdfPayload(
   const { data: audit, error: auditErr } = await supabase
     .from("audits")
     .select(
-      "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, report_pdf_path, report_generated_at, created_at",
+      "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, site_wide_checks, crux_field_checks, near_duplicate_checks, report_pdf_path, report_generated_at, created_at",
     )
     .eq("id", auditId)
     .maybeSingle();
@@ -40,7 +65,9 @@ export async function loadAuditPdfPayload(
       .order("score", { ascending: false, nullsFirst: false }),
     supabase
       .from("communities")
-      .select("id, company_id, name, website_url, created_at")
+      .select(
+        "id, company_id, name, website_url, facility_type, manual_check_results, created_at",
+      )
       .eq("id", audit.community_id)
       .maybeSingle(),
   ]);
@@ -57,11 +84,24 @@ export async function loadAuditPdfPayload(
     company = (companyRow as Company | null) ?? null;
   }
 
+  const typedAudit = audit as Audit;
+  const sw = typedAudit.site_wide_checks;
+  const siteWideChecks = Array.isArray(sw) ? (sw as AuditCheck[]) : [];
+  const cr = typedAudit.crux_field_checks;
+  const cruxFieldChecks = Array.isArray(cr) ? (cr as AuditCheck[]) : [];
+  const nd = typedAudit.near_duplicate_checks;
+  const nearDuplicateChecks = Array.isArray(nd) ? (nd as AuditCheck[]) : [];
+  const typedCommunity = (community as Community | null) ?? null;
+
   return {
-    audit: audit as Audit,
+    audit: typedAudit,
     pages: (pages ?? []) as AuditPage[],
-    community: (community as Community | null) ?? null,
+    community: typedCommunity,
     company,
+    siteWideChecks,
+    cruxFieldChecks,
+    nearDuplicateChecks,
+    manualChecklistRows: buildManualPdfRows(typedCommunity),
   };
 }
 
@@ -72,15 +112,16 @@ export async function loadAuditPdfPayload(
 export async function renderAuditPdfBuffer(
   payload: AuditPdfPayload,
 ): Promise<Buffer> {
-  const instance = pdf(
+  return renderToBuffer(
     <AuditReportPdfDocument
       audit={payload.audit}
       community={payload.community}
       company={payload.company}
       pages={payload.pages}
+      siteWideChecks={payload.siteWideChecks}
+      cruxFieldChecks={payload.cruxFieldChecks}
+      nearDuplicateChecks={payload.nearDuplicateChecks}
+      manualChecklistRows={payload.manualChecklistRows}
     />,
   );
-  const blob = await instance.toBlob();
-  const arrayBuffer = await blob.arrayBuffer();
-  return Buffer.from(arrayBuffer);
 }

@@ -1,6 +1,29 @@
+"use client";
+
 import { CircleAlert, CircleCheck, CircleX } from "lucide-react";
 
+import { CollapsibleCheckRow } from "@/components/audits/CollapsibleCheckRow";
 import type { AuditCheck, CheckResult } from "@/types";
+
+function groupChecksByCategory(checks: AuditCheck[]): {
+  category: string;
+  items: AuditCheck[];
+}[] {
+  const order: string[] = [];
+  const map = new Map<string, AuditCheck[]>();
+  for (const c of checks) {
+    const cat = c.category?.trim() || "General";
+    if (!map.has(cat)) {
+      map.set(cat, []);
+      order.push(cat);
+    }
+    map.get(cat)!.push(c);
+  }
+  return order.map((category) => ({
+    category,
+    items: map.get(category) ?? [],
+  }));
+}
 
 function Icon({ result }: { result: CheckResult }) {
   if (result === "pass") {
@@ -30,25 +53,81 @@ function Icon({ result }: { result: CheckResult }) {
 export function CheckList({
   title,
   checks,
+  explanationLayout = "inline",
+  scoreDraft,
 }: {
   title: string;
   checks: AuditCheck[];
+  explanationLayout?: "inline" | "collapsible";
+  /** Local-only toggles; parent saves with one action at the end of the section. */
+  scoreDraft?: {
+    excludedByKey: Record<string, boolean>;
+    onExcludedChange: (checkKey: string, excluded: boolean) => void;
+    disabled?: boolean;
+  };
 }) {
   if (checks.length === 0) return null;
+  const grouped = groupChecksByCategory(checks);
+  const showCategoryHeaders =
+    grouped.length > 1 ||
+    (grouped.length === 1 && grouped[0]?.category !== "General");
+  const rowGap =
+    explanationLayout === "collapsible" ? "gap-1.5" : "gap-2";
+
   return (
     <div className="flex flex-col gap-2">
-      <h4 className="text-sm font-semibold">{title}</h4>
-      <ul className="flex flex-col gap-2">
-        {checks.map((c) => (
-          <li key={c.key} className="flex gap-2 text-sm">
-            <Icon result={c.result} />
-            <div>
-              <span className="font-medium">{c.label}</span>
-              <p className="text-muted-foreground">{c.explanation}</p>
-            </div>
-          </li>
+      {title ? <h4 className="text-sm font-semibold">{title}</h4> : null}
+      <div className="flex flex-col gap-4">
+        {grouped.map(({ category, items }) => (
+          <div key={category} className="flex flex-col gap-2">
+            {showCategoryHeaders ? (
+              <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {category}
+              </h5>
+            ) : null}
+            <ul className={`flex flex-col ${rowGap}`}>
+              {items.map((c) =>
+                explanationLayout === "collapsible" ? (
+                  <li key={c.key}>
+                    <CollapsibleCheckRow
+                      check={
+                        scoreDraft
+                          ? {
+                              ...c,
+                              excludeFromScore: scoreDraft.excludedByKey[c.key]
+                                ? true
+                                : undefined,
+                            }
+                          : c
+                      }
+                      scoreToggle={
+                        scoreDraft
+                          ? {
+                              includeInScore:
+                                scoreDraft.excludedByKey[c.key] !== true,
+                              disabled: scoreDraft.disabled,
+                              onIncludeChange: (include) => {
+                                scoreDraft.onExcludedChange(c.key, !include);
+                              },
+                            }
+                          : undefined
+                      }
+                    />
+                  </li>
+                ) : (
+                  <li key={c.key} className="flex gap-2 text-sm">
+                    <Icon result={c.result} />
+                    <div>
+                      <span className="font-medium">{c.label}</span>
+                      <p className="whitespace-pre-line text-muted-foreground">{c.explanation}</p>
+                    </div>
+                  </li>
+                ),
+              )}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }

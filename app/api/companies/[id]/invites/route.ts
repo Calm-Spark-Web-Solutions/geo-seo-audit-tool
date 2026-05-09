@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { generateInviteToken, inviteUrl } from "@/lib/invites";
+import { consumeRateLimit } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
 import type { CompanyRole } from "@/types";
 
@@ -8,6 +9,10 @@ export const runtime = "nodejs";
 
 const ROLES: readonly CompanyRole[] = ["owner", "admin", "member"];
 const DEFAULT_EXPIRY_DAYS = 7;
+// 20 invites / hour / user — generous for legitimate org buildouts and
+// blunts an abuse loop where a compromised owner mass-mails invites.
+const INVITE_MAX = 20;
+const INVITE_WINDOW_S = 60 * 60;
 
 interface CreateInviteBody {
   email?: string;
@@ -47,6 +52,19 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const allowed = await consumeRateLimit(
+    supabase,
+    `invite:create:${user.id}`,
+    INVITE_MAX,
+    INVITE_WINDOW_S,
+  );
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many invites sent recently. Try again in an hour." },
+      { status: 429 },
+    );
+  }
+
   const expiresInDays = body.expiresInDays ?? DEFAULT_EXPIRY_DAYS;
   const expiresAt = new Date(
     Date.now() + expiresInDays * 24 * 60 * 60 * 1000,
@@ -80,5 +98,8 @@ export async function POST(
     );
   }
 
-  return NextResponse.json({ invite: data, token, acceptUrl }, { status: 201 });
+  // Intentionally do NOT return the raw `token` — only the full acceptUrl
+  // (which already contains it) and the public-safe invite metadata. The
+  // inviter shares the acceptUrl; the token is otherwise stored as a hash.
+  return NextResponse.json({ invite: data, acceptUrl }, { status: 201 });
 }

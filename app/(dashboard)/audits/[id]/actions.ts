@@ -49,7 +49,12 @@ export async function savePdfToStorage(
   let buffer: Buffer;
   try {
     buffer = await renderAuditPdfBuffer(payload);
-  } catch {
+  } catch (err) {
+    console.error("renderAuditPdfBuffer failed in savePdfToStorage", {
+      auditId,
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return { ok: false, error: "Failed to render PDF." };
   }
 

@@ -1,68 +1,111 @@
-import { ExternalLink } from "lucide-react";
+import { ChevronRight, ExternalLink } from "lucide-react";
 
-import { CheckList } from "@/components/audits/CheckList";
+import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
+
+import { diffPage } from "@/lib/audit/diff";
 import type { AuditCheck, AuditPage, FixItem } from "@/types";
 
-export function AuditPageRow({ page }: { page: AuditPage }) {
+export type PriorPageSnapshot = {
+  seo_results: AuditCheck[] | null;
+  geo_results: AuditCheck[] | null;
+};
+
+interface AuditPageRowProps {
+  auditId: string;
+  page: AuditPage;
+  prior?: PriorPageSnapshot;
+}
+
+/**
+ * Compact link row for the audit detail list. The whole row navigates to
+ * `/audits/{auditId}/pages/{pageId}` for the full breakdown; the small
+ * external-link affordance stays an `<a>` so users can open the audited
+ * URL in a new tab without leaving the list.
+ */
+export function AuditPageRow({ auditId, page, prior }: AuditPageRowProps) {
   const seo = (page.seo_results ?? []) as AuditCheck[];
   const geo = (page.geo_results ?? []) as AuditCheck[];
   const fixes = (page.fixes ?? []) as FixItem[];
 
+  const totals = countResults([...seo, ...geo]);
+  const totalChecks = seo.length + geo.length;
+  const deltaCount =
+    prior && (seo.length > 0 || geo.length > 0)
+      ? diffPage(
+          { seo_results: seo, geo_results: geo },
+          { seo_results: prior.seo_results, geo_results: prior.geo_results },
+        ).length
+      : 0;
+
+  const summary =
+    totalChecks === 0
+      ? "Awaiting checks…"
+      : [
+          `${totals.pass} pass`,
+          totals.warn > 0 ? `${totals.warn} warn` : null,
+          totals.fail > 0 ? `${totals.fail} fail` : null,
+          fixes.length > 0
+            ? `${fixes.length} fix${fixes.length === 1 ? "" : "es"}`
+            : null,
+          deltaCount > 0
+            ? `${deltaCount} change${deltaCount === 1 ? "" : "s"} vs prior`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
   return (
-    <details className="group border-b border-border last:border-0">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3 pr-1 [&::-webkit-details-marker]:hidden">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <a
-            href={page.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 truncate text-sm font-medium hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <span className="truncate">{page.url}</span>
-            <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-          </a>
-          <span className="text-xs text-muted-foreground">
-            {fixes.length} suggested fix{fixes.length === 1 ? "" : "es"}
-          </span>
-        </div>
-        <span className="shrink-0 text-sm font-semibold tabular-nums">
+    <div className="group relative flex items-center gap-3 border-b border-border py-3 transition-colors last:border-0 hover:bg-muted/30">
+      <Link
+        href={`/audits/${auditId}/pages/${page.id}`}
+        className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-1 -mx-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={`View detailed audit results for ${page.url}`}
+      >
+        <span className="truncate text-sm font-medium">{page.url}</span>
+        <span className="text-xs text-muted-foreground">{summary}</span>
+      </Link>
+      <a
+        href={page.url}
+        target="_blank"
+        rel="noreferrer"
+        className="relative z-10 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        onClick={(e) => e.stopPropagation()}
+        aria-label="Open page in new tab"
+        title="Open page in new tab"
+      >
+        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+      </a>
+      <span className="flex shrink-0 items-center gap-2">
+        {page.exclude_from_audit_score ? (
+          <Badge variant="secondary" className="hidden font-normal sm:inline-flex">
+            Rollup off
+          </Badge>
+        ) : null}
+        <span className="text-sm font-semibold tabular-nums">
           {page.score ?? "—"}
         </span>
-      </summary>
-      <div className="flex flex-col gap-4 border-t border-border bg-muted/20 px-1 py-4 sm:px-3">
-        {page.ai_comment ? (
-          <div className="rounded-md border border-border bg-card px-3 py-2 text-sm">
-            <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              AI commentary
-            </h4>
-            <p className="whitespace-pre-wrap text-foreground">{page.ai_comment}</p>
-          </div>
-        ) : null}
-        <div className="grid gap-6 md:grid-cols-2">
-          <CheckList title="SEO checks" checks={seo} />
-          <CheckList title="GEO checks" checks={geo} />
-        </div>
-        {fixes.length > 0 ? (
-          <div>
-            <h4 className="mb-2 text-sm font-semibold">Suggested fixes</h4>
-            <ul className="flex flex-col gap-2 text-sm">
-              {fixes.map((f, i) => (
-                <li
-                  key={`${f.title}-${i}`}
-                  className="rounded-md border border-border bg-card px-3 py-2"
-                >
-                  <span className="font-medium capitalize text-muted-foreground">
-                    [{f.priority}]{" "}
-                  </span>
-                  {f.title}
-                  <p className="text-muted-foreground">{f.detail}</p>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
-    </details>
+      </span>
+      <ChevronRight
+        className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+        aria-hidden
+      />
+    </div>
   );
+}
+
+function countResults(checks: AuditCheck[]): {
+  pass: number;
+  warn: number;
+  fail: number;
+} {
+  let pass = 0;
+  let warn = 0;
+  let fail = 0;
+  for (const c of checks) {
+    if (c.result === "pass") pass += 1;
+    else if (c.result === "warn") warn += 1;
+    else fail += 1;
+  }
+  return { pass, warn, fail };
 }

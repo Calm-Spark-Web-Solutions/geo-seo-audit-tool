@@ -2,16 +2,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AuditDetailLive } from "@/components/audits/AuditDetailLive";
+import { DeleteAuditButton } from "@/components/audits/DeleteAuditButton";
 import { PdfActions } from "@/components/audits/PdfActions";
+import { CommunityManualChecklist } from "@/components/communities/CommunityManualChecklist";
+import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import type { Audit, AuditPage, Community } from "@/types";
+import type {
+  Audit,
+  AuditCheck,
+  AuditPage,
+  Community,
+  CommunityManualResults,
+} from "@/types";
+
+export type PriorPageSnapshot = {
+  seo_results: AuditCheck[] | null;
+  geo_results: AuditCheck[] | null;
+};
 
 export const dynamic = "force-dynamic";
 
@@ -28,14 +36,14 @@ export default async function AuditReportPage({
       supabase
         .from("audits")
         .select(
-          "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, report_pdf_path, report_generated_at, created_at",
+          "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, site_wide_checks, crux_field_checks, near_duplicate_checks, engine_version, report_pdf_path, report_generated_at, created_at",
         )
         .eq("id", id)
         .maybeSingle(),
       supabase
         .from("audit_pages")
         .select(
-          "id, audit_id, url, score, seo_results, geo_results, fixes, manual_notes, ai_comment, created_at",
+          "id, audit_id, url, score, seo_results, geo_results, fixes, manual_notes, ai_comment, exclude_from_audit_score, created_at",
         )
         .eq("audit_id", id)
         .order("score", { ascending: false, nullsFirst: false }),
@@ -43,12 +51,10 @@ export default async function AuditReportPage({
 
   if (auditError) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Audit</CardTitle>
-          <CardDescription>{auditError.message}</CardDescription>
-        </CardHeader>
-      </Card>
+      <InlineErrorCard
+        title="Could not load audit"
+        description={auditError.message}
+      />
     );
   }
 
@@ -57,13 +63,46 @@ export default async function AuditReportPage({
   const typedAudit = audit as Audit;
   const typedPages = (pages ?? []) as AuditPage[];
 
-  const { data: community } = await supabase
-    .from("communities")
-    .select("id, name, company_id")
-    .eq("id", typedAudit.community_id)
-    .maybeSingle();
+  const [{ data: community }, { data: priorAudit }] = await Promise.all([
+    supabase
+      .from("communities")
+      .select("id, name, company_id, facility_type, manual_check_results")
+      .eq("id", typedAudit.community_id)
+      .maybeSingle(),
+    supabase
+      .from("audits")
+      .select("id, created_at")
+      .eq("community_id", typedAudit.community_id)
+      .eq("status", "complete")
+      .lt("created_at", typedAudit.created_at)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
-  const typedCommunity = community as Community | null;
+  type CommunityRow = Community & {
+    manual_check_results: CommunityManualResults | null;
+  };
+  const typedCommunity = community as CommunityRow | null;
+
+  let priorByUrl: Record<string, PriorPageSnapshot> = {};
+  if (priorAudit?.id) {
+    const { data: priorPages } = await supabase
+      .from("audit_pages")
+      .select("url, seo_results, geo_results")
+      .eq("audit_id", priorAudit.id);
+    if (priorPages) {
+      const acc: Record<string, PriorPageSnapshot> = {};
+      for (const p of priorPages) {
+        const row = p as PriorPageSnapshot & { url: string };
+        acc[row.url] = {
+          seo_results: row.seo_results,
+          geo_results: row.geo_results,
+        };
+      }
+      priorByUrl = acc;
+    }
+  }
 
   return (
     <>
@@ -81,7 +120,25 @@ export default async function AuditReportPage({
           )
         }
         title="Audit report"
-        description="Per-page SEO and GEO checks with AI commentary."
+        description={
+          <span className="flex flex-col gap-1">
+            <span>Per-page SEO and GEO checks with AI commentary.</span>
+            {typedCommunity?.facility_type ? (
+              <span className="text-muted-foreground">
+                Facility type · {typedCommunity.facility_type}
+              </span>
+            ) : null}
+          </span>
+        }
+        actions={
+          <DeleteAuditButton
+            auditId={typedAudit.id}
+            auditLabel={new Date(typedAudit.created_at).toLocaleString()}
+            disabled={
+              typedAudit.status === "pending" || typedAudit.status === "running"
+            }
+          />
+        }
       />
 
       <PdfActions
@@ -91,9 +148,19 @@ export default async function AuditReportPage({
       />
 
       <AuditDetailLive
+        key={typedAudit.id}
         initialAudit={typedAudit}
         initialPages={typedPages}
+        priorByUrl={priorByUrl}
       />
+
+      {typedCommunity ? (
+        <CommunityManualChecklist
+          communityId={typedCommunity.id}
+          initialResults={typedCommunity.manual_check_results}
+          variant="collapsible"
+        />
+      ) : null}
     </>
   );
 }

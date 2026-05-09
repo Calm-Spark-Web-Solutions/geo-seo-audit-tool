@@ -16,7 +16,7 @@ export default function SettingsPage() {
       />
       <Card>
         <CardHeader>
-          <CardTitle>Account</CardTitle>
+          <CardTitle className="text-base">Account</CardTitle>
           <CardDescription>
             Profile management and Stripe billing portal will live here.
           </CardDescription>

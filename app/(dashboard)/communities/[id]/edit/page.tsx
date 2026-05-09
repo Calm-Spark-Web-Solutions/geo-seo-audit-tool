@@ -2,12 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CommunityForm } from "@/components/communities/CommunityForm";
+import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -25,18 +25,16 @@ export default async function EditCommunityPage({
   const supabase = await createClient();
   const { data: community, error } = await supabase
     .from("communities")
-    .select("id, company_id, name, website_url, created_at")
+    .select("id, company_id, name, website_url, facility_type, created_at")
     .eq("id", id)
     .maybeSingle();
 
   if (error) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Edit community</CardTitle>
-          <CardDescription>{error.message}</CardDescription>
-        </CardHeader>
-      </Card>
+      <InlineErrorCard
+        title="Could not load community"
+        description={error.message}
+      />
     );
   }
   if (!community) notFound();
@@ -61,7 +59,7 @@ export default async function EditCommunityPage({
       <div className="mx-auto w-full max-w-2xl">
         <Card>
           <CardHeader>
-            <CardTitle>Community details</CardTitle>
+            <CardTitle className="text-base">Community details</CardTitle>
           </CardHeader>
           <CardContent>
             <CommunityForm initial={typedCommunity} />

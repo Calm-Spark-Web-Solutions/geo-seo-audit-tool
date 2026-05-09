@@ -56,7 +56,9 @@ export function PdfActions({
   useEffect(() => {
     if (signedPending) return;
     if (signedState.ok && signedState.url) {
-      window.open(signedState.url, "_blank", "noopener,noreferrer");
+      // Same-tab navigation avoids popup blockers (window.open after an
+      // async action is treated as programmatic and frequently blocked).
+      window.location.assign(signedState.url);
     } else if (signedState.error) {
       toast.error("Could not open saved PDF", {
         description: signedState.error,

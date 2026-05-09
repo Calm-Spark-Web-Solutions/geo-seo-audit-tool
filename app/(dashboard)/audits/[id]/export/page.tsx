@@ -37,7 +37,7 @@ export default async function AuditExportPage({
 
   const { data: community } = await supabase
     .from("communities")
-    .select("id, name, company_id")
+    .select("id, name, company_id, facility_type")
     .eq("id", typedAudit.community_id)
     .maybeSingle();
 

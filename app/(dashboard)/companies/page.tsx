@@ -3,9 +3,9 @@ import { Building2, Plus } from "lucide-react";
 
 import { CompanyCard } from "@/components/companies/CompanyCard";
 import { EmptyState } from "@/components/layout/EmptyState";
+import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import type { Company } from "@/types";
 
@@ -22,12 +22,10 @@ export default async function CompaniesPage() {
 
   if (error) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Organizations</CardTitle>
-          <CardDescription>{error.message}</CardDescription>
-        </CardHeader>
-      </Card>
+      <InlineErrorCard
+        title="Could not load organizations"
+        description={error.message}
+      />
     );
   }
 
@@ -38,7 +36,7 @@ export default async function CompaniesPage() {
     <>
       <PageHeader
         title="Organizations"
-        description="Operators and agencies you can manage."
+        description="Companies you run and companies you audit. Use this area when someone needs cross-company access (for example a GEO or SEO auditor with several clients)."
         actions={
           <Button asChild>
             <Link href="/companies/new">

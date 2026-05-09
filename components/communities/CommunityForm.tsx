@@ -10,6 +10,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FACILITY_TYPES } from "@/lib/facility-types";
+import { cn } from "@/lib/utils";
 import type { Community } from "@/types";
 
 interface Props {
@@ -53,8 +55,33 @@ export function CommunityForm({ companyId, initial }: Props) {
         />
       </Field>
 
+      <Field
+        label="Facility type"
+        htmlFor="facility_type"
+        error={state.fieldErrors?.facility_type}
+        hint="Shown on audit pages and exported PDF reports."
+      >
+        <select
+          id="facility_type"
+          name="facility_type"
+          defaultValue={initial?.facility_type ?? ""}
+          className={cn(
+            "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-base shadow-sm",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            "disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+          )}
+        >
+          <option value="">Not set</option>
+          {FACILITY_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </Field>
+
       {state.error && !state.fieldErrors ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
+        <p className="text-sm text-destructive">{state.error}</p>
       ) : null}
 
       <div className="flex items-center justify-end gap-2">
@@ -76,20 +103,21 @@ function Field({
   label,
   htmlFor,
   error,
+  hint,
   children,
 }: {
   label: string;
   htmlFor: string;
   error?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
-      {error ? (
-        <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
-      ) : null}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
 }

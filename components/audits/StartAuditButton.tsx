@@ -4,10 +4,21 @@ import { useFormStatus } from "react-dom";
 
 import { Button } from "@/components/ui/button";
 
-export function StartAuditButton() {
+interface StartAuditButtonProps {
+  /** External invalid state (e.g. zero URLs selected, selection over cap). */
+  disabled?: boolean;
+}
+
+export function StartAuditButton({
+  disabled = false,
+}: StartAuditButtonProps = {}) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending} className="min-w-[9rem]">
+    <Button
+      type="submit"
+      disabled={pending || disabled}
+      className="min-w-[9rem]"
+    >
       {pending ? "Running audit…" : "Start audit"}
     </Button>
   );
