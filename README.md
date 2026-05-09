@@ -49,8 +49,7 @@ A full-stack web application for InyoCare to run AI-powered SEO and GEO (Generat
 │   │   │   ├── crawl/route.ts            # Crawl sitemap / pages
 │   │   │   └── analyze/route.ts          # Run Anthropic analysis per page
 │   │   ├── stripe/
-│   │   │   ├── webhook/route.ts          # Stripe webhook handler
-│   │   │   └── portal/route.ts           # Customer portal redirect
+│   │   │   └── webhook/route.ts          # Stripe webhook → subscriptions table
 │   │   └── export/
 │   │       └── pdf/route.ts              # Generate + upload PDF to Supabase Storage
 │   └── layout.tsx
@@ -88,8 +87,12 @@ A full-stack web application for InyoCare to run AI-powered SEO and GEO (Generat
 │   │   ├── deterministic.ts              # cheerio checks (10 SEO + 9 GEO keys)
 │   │   ├── psi.ts                        # Google PageSpeed Insights wrapper
 │   │   └── anthropic-scores.ts           # Anthropic tool-use: comment + 4 subscores
+│   ├── billing/
+│   │   ├── actions.ts                    # Checkout + Customer Portal (server actions)
+│   │   ├── plans.ts                      # Tier marketing copy + Partner program label
+│   │   └── price-map.ts                  # Env Price IDs ↔ plan slug for webhooks
 │   ├── stripe/
-│   │   └── client.ts                     # Stripe helpers
+│   │   └── server.ts                     # Lazy Stripe SDK (server-only)
 │   └── pdf/
 │       ├── report.tsx                    # React PDF document (per-page report)
 │       └── render.tsx                    # Buffer renderer + RLS-aware payload loader
@@ -220,10 +223,15 @@ SUPABASE_SERVICE_ROLE_KEY=
 # Anthropic
 ANTHROPIC_API_KEY=
 
-# Stripe
+# Stripe (see .env.example for all `STRIPE_PRICE_*` keys and docs/stripe-dashboard-setup.md)
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
+# Per-tier recurring Price IDs from the Stripe Dashboard (test vs live)
+# STRIPE_PRICE_RESIDENCE_MONTHLY= price_...
+# ... (full list in .env.example)
+# Optional: show Partner program checkout in Settings
+# NEXT_PUBLIC_SHOW_PARTNER_CHECKOUT=1
 ```
 
 ---
@@ -297,12 +305,13 @@ Each check returns: `pass | warn | fail` + a one-line explanation.
 - Live progress bar updates as each page is analyzed
 - No polling required
 
-### 9. Stripe Billing (Optional / Future)
-- **Free plan:** 5 audits/month, 1 company
-- **Pro plan:** Unlimited audits, unlimited companies, PDF export
-- **Agency plan:** Everything in Pro + white-label PDF reports
-- Stripe Customer Portal for self-serve plan management
-- Webhooks sync subscription status back to Supabase
+### 9. Stripe Billing (subscriptions tracked; usage limits not enforced yet)
+- **Tiers:** Residence, Community, and Portfolio (monthly / yearly) plus **Partner program** (invite-oriented label—avoid calling it an “internal discount” in customer-facing copy).
+- **Settings (`/settings`):** pricing cards → Stripe Checkout; **Manage billing** opens the Stripe Customer Portal when a `stripe_customer_id` exists.
+- **`POST /api/stripe/webhook`:** verifies signatures and upserts `public.subscriptions` with the **service role** key (`plan` stores a slug such as `community_monthly`; status mirrors Stripe).
+- **Partner checkout button:** hidden by default; set `NEXT_PUBLIC_SHOW_PARTNER_CHECKOUT=1` and `STRIPE_PRICE_PARTNER_MONTHLY` when you want signed-in users to self-serve that tier.
+- **Dashboard setup:** [docs/stripe-dashboard-setup.md](docs/stripe-dashboard-setup.md) — create Products/Prices (test mode first), enable Customer Portal, register webhook events (`checkout.session.completed`, `customer.subscription.*`).
+- **Out of scope for now:** enforcing audit/community/page caps by plan (subscription row exists for future gating).
 
 ---
 
@@ -485,7 +494,8 @@ remove this row.
 2. Connect repo to Vercel
 3. Add all environment variables in Vercel dashboard
 4. Vercel auto-deploys on every push to `main`
-5. Set Stripe webhook endpoint to `https://yourdomain.com/api/stripe/webhook`
+5. Set Stripe webhook endpoint to `https://yourdomain.com/api/stripe/webhook` (same events as [docs/stripe-dashboard-setup.md](docs/stripe-dashboard-setup.md)); paste live signing secret into `STRIPE_WEBHOOK_SECRET`.
+6. Copy **live** Price IDs into production env vars (`STRIPE_PRICE_*`).
 
 ---
 
@@ -504,7 +514,7 @@ remove this row.
 | 9 | Real audit engine (deterministic + PSI + Anthropic tool-use) + per-page diffs + community trend ✅ | 1.5 days |
 | 10 | Audit ops & resilience: Postgres queue + lease + Vercel Cron reaper, cancel button, per-org rate limit ✅ | 1 day |
 | 11 | Audit category selection: sitemap-shard picker, configurable max_pages (1..1000) ✅ | 0.5 day |
-| 12 | Stripe billing (optional) | 1 day |
+| 12 | Stripe billing (Checkout + webhook sync + Settings UI) ✅ | 1 day |
 | 13 | Polish, error handling, deploy to Vercel | 0.5 day |
 | **Total** | | **~7 days** |
 
