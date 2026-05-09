@@ -9,16 +9,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { safeNextPath } from "@/lib/validation/redirect";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
+  const safeNext = safeNextPath(next);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6">
+    <main
+      id="main"
+      className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6"
+    >
       <Brand size="lg" />
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
@@ -34,7 +39,7 @@ export default async function LoginPage({
               signing in or request a new link from sign up.
             </p>
           ) : null}
-          <LoginForm />
+          <LoginForm next={safeNext} />
         </CardContent>
       </Card>
       <Link
@@ -43,6 +48,6 @@ export default async function LoginPage({
       >
         Back to home
       </Link>
-    </div>
+    </main>
   );
 }

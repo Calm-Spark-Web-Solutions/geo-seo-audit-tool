@@ -1,5 +1,7 @@
 import axios from "axios";
 
+import { assertSafeUrl } from "@/lib/security/ssrf";
+
 import {
   DEFAULT_CRAWL_TIMEOUT_MS,
   DEFAULT_USER_AGENT,
@@ -11,7 +13,8 @@ export interface FetchPageOptions {
 }
 
 /**
- * Fetch HTML for a single URL. Returns null on non-HTML, errors, or timeouts.
+ * Fetch HTML for a single URL. Returns null on non-HTML, errors, timeouts,
+ * or SSRF-guard rejections.
  */
 export async function fetchPageHtml(
   url: string,
@@ -21,6 +24,10 @@ export async function fetchPageHtml(
   const userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
 
   try {
+    // Preflight DNS/IP guard before any socket opens. Rejected URLs are
+    // treated like other fetch failures (null) so a single hostile entry
+    // in a sitemap can't poison the rest of the audit.
+    await assertSafeUrl(url);
     const res = await axios.get(url, {
       timeout,
       headers: {

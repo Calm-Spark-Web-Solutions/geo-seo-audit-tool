@@ -1,30 +1,17 @@
-import Link from "next/link";
-
 import { Brand } from "@/components/layout/Brand";
+import { MobileNavSheet } from "@/components/layout/MobileNavSheet";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { createClient } from "@/lib/supabase/server";
+import type { Company } from "@/types";
 
-export async function Topbar() {
+export async function Topbar({ companies }: { companies: Company[] }) {
   const { email, fullName, avatarUrl } = await loadUser();
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 w-full items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur md:px-6">
-      <div className="flex items-center gap-6">
+    <header className="sticky top-0 z-20 flex h-14 w-full items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur md:px-6">
+      <div className="flex min-w-0 items-center gap-3">
+        <MobileNavSheet companies={companies} />
         <Brand size="md" />
-        <nav className="flex items-center gap-4 text-sm md:hidden">
-          <Link
-            href="/dashboard"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            Dashboard
-          </Link>
-          <Link
-            href="/companies"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            Organizations
-          </Link>
-        </nav>
       </div>
       <UserMenu email={email} fullName={fullName} avatarUrl={avatarUrl} />
     </header>

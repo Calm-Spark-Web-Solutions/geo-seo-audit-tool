@@ -9,6 +9,7 @@ const variantMap: Record<
   running: "default",
   complete: "outline",
   failed: "destructive",
+  cancelled: "secondary",
 };
 
 export function StatusBadge({ status }: { status: AuditStatus }) {

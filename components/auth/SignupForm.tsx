@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 
 const initialState: AuthFormState = { ok: true };
 
-export function SignupForm() {
+export function SignupForm({ next }: { next?: string | null }) {
   const [state, formAction, pending] = useActionState(signUp, initialState);
 
   if (state.sent) {
@@ -34,6 +34,7 @@ export function SignupForm() {
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <Field
         label="Email"
         htmlFor="email"
@@ -102,11 +103,8 @@ function Field({
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
-      {error ? (
-        <p className="text-xs text-destructive">{error}</p>
-      ) : hint ? (
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      ) : null}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
 }

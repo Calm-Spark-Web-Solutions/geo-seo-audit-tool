@@ -83,7 +83,7 @@ export function CompanyForm({ initial, defaults }: Props) {
       </Field>
 
       {state.error && !state.fieldErrors ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
+        <p className="text-sm text-destructive">{state.error}</p>
       ) : null}
 
       <div className="flex items-center justify-end gap-2">
@@ -118,11 +118,8 @@ function Field({
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
-      {error ? (
-        <p className="text-xs text-destructive">{error}</p>
-      ) : hint ? (
-        <p className="text-xs text-muted-foreground">{hint}</p>
-      ) : null}
+      {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   );
 }

@@ -2,7 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Gauge } from "lucide-react";
 
-import { StartAuditForm } from "@/components/audits/StartAuditForm";
+import {
+  StartAuditForm,
+  type ShardOption,
+} from "@/components/audits/StartAuditForm";
+import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
   Card,
@@ -11,11 +15,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { fetchSitemapShards } from "@/lib/crawler/sitemap";
 import { createClient } from "@/lib/supabase/server";
 import type { Community } from "@/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+const DEFAULT_MAX_PAGES = 100;
+// Hard ceiling on how many URLs we materialize per shard for the picker.
+// Matches the audit hard cap (1000) so anything past this couldn't have
+// been audited in a single run anyway.
+const URL_PREVIEW_LIMIT = 1000;
 
 export default async function NewAuditPage({
   params,
@@ -27,24 +38,42 @@ export default async function NewAuditPage({
 
   const { data: community, error } = await supabase
     .from("communities")
-    .select("id, company_id, name, website_url, created_at")
+    .select("id, company_id, name, website_url, facility_type, created_at")
     .eq("id", id)
     .maybeSingle();
 
   if (error) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>New audit</CardTitle>
-          <CardDescription>{error.message}</CardDescription>
-        </CardHeader>
-      </Card>
+      <InlineErrorCard
+        title="Could not load community"
+        description={error.message}
+      />
     );
   }
 
   if (!community) notFound();
 
   const typed = community as Community;
+
+  // Probe sitemap shards server-side so the picker renders immediately on
+  // first paint. Tight timeout — if the site is slow we still render the
+  // form (just without shard checkboxes) and the runner falls back to the
+  // legacy sitemap-then-crawl path.
+  const rawShards = await fetchSitemapShards(typed.website_url, {
+    timeoutMs: 6_000,
+  }).catch(() => []);
+
+  const shards: ShardOption[] = rawShards.map((s) => {
+    const visibleUrls = s.urls.slice(0, URL_PREVIEW_LIMIT);
+    return {
+      url: s.url,
+      label: s.label,
+      urlCount: visibleUrls.length,
+      totalCount: s.urlCount,
+      defaultChecked: s.defaultChecked,
+      urls: visibleUrls,
+    };
+  });
 
   return (
     <>
@@ -60,9 +89,10 @@ export default async function NewAuditPage({
         title="Run new audit"
         description={
           <span className="text-muted-foreground">
-            We&apos;ll crawl up to 10 pages (sitemap first, then same-site
-            links), score each page with on-page checks, then show a full
-            report. This usually takes under a minute.
+            Pick which sitemap categories to include and how many URLs to
+            crawl. Each page is scored with deterministic checks plus PSI
+            and Anthropic commentary, so larger runs take proportionally
+            longer.
           </span>
         }
       />
@@ -88,7 +118,11 @@ export default async function NewAuditPage({
           </div>
         </CardHeader>
         <CardContent>
-          <StartAuditForm communityId={typed.id} />
+          <StartAuditForm
+            communityId={typed.id}
+            shards={shards}
+            defaultMaxPages={DEFAULT_MAX_PAGES}
+          />
         </CardContent>
       </Card>
     </>

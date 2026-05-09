@@ -30,9 +30,11 @@ export function DeleteCommunityButton({
       try {
         await deleteCommunity(communityId);
       } catch (err) {
-        toast.error("Could not delete community", {
-          description: err instanceof Error ? err.message : "Unknown error",
-        });
+        // `redirect()` from server actions throws a tagged NEXT_REDIRECT error
+        // we must let bubble silently — only surface real failures.
+        const message = err instanceof Error ? err.message : "Unknown error";
+        if (message.includes("NEXT_REDIRECT")) return;
+        toast.error("Could not delete community", { description: message });
       }
     });
   }

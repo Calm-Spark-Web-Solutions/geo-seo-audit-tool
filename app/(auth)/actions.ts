@@ -3,8 +3,11 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { consumeRateLimit } from "@/lib/ratelimit";
+import { getClientIp } from "@/lib/security/client-ip";
 import { createClient } from "@/lib/supabase/server";
 import { signInSchema, signUpSchema } from "@/lib/validation/auth";
+import { safeNextPath } from "@/lib/validation/redirect";
 
 export type AuthFormState = {
   ok: boolean;
@@ -13,6 +16,21 @@ export type AuthFormState = {
   sent?: boolean;
   email?: string;
 };
+
+// Generic copy intentionally — never reveal whether the email exists,
+// whether the password was right, or which limit fired. Same surface for
+// human typos and credential-stuffing scripts.
+const RATE_LIMIT_COPY = "Too many attempts. Please wait a few minutes and try again.";
+
+// 10 sign-in attempts per IP per 5 minutes blunts credential stuffing
+// without locking out a legitimate human who fat-fingered their password.
+const SIGNIN_MAX = 10;
+const SIGNIN_WINDOW_S = 5 * 60;
+
+// Sign-up is much rarer per real human (one per launch), so a tighter
+// cap deters spam-account creation from a single IP.
+const SIGNUP_MAX = 5;
+const SIGNUP_WINDOW_S = 60 * 60;
 
 function fieldErrorsFrom(
   zodError: import("zod").ZodError,
@@ -60,6 +78,21 @@ export async function signIn(
   }
 
   const supabase = await createClient();
+
+  // Rate-limit BEFORE the password check so a credential-stuffing run
+  // can't spend our cap-bucket per attempt. `unknown` falls back to a
+  // shared bucket only when no proxy header is available (local dev).
+  const ip = getClientIp(await headers()) ?? "unknown";
+  const allowed = await consumeRateLimit(
+    supabase,
+    `auth:signin:${ip}`,
+    SIGNIN_MAX,
+    SIGNIN_WINDOW_S,
+  );
+  if (!allowed) {
+    return { ok: false, error: RATE_LIMIT_COPY };
+  }
+
   const { data, error } = await supabase.auth.signInWithPassword({
     email: parsed.data.email,
     password: parsed.data.password,
@@ -75,8 +108,14 @@ export async function signIn(
     return { ok: false, error: friendly };
   }
 
+  const next = safeNextPath(formData.get("next"));
   const count = await membershipCountForUser(data.user.id);
-  redirect(count > 0 ? "/dashboard" : "/onboarding");
+  // If the user has memberships, honor `next` (e.g. /invite/<token>);
+  // otherwise force them through onboarding to create their first org.
+  if (count > 0) {
+    redirect(next ?? "/dashboard");
+  }
+  redirect("/onboarding");
 }
 
 export async function signUp(
@@ -96,6 +135,20 @@ export async function signUp(
   }
 
   const supabase = await createClient();
+
+  // Sign-up is rare per real user; cap per-IP per-hour to deter spam
+  // account creation against the email service.
+  const ip = getClientIp(await headers()) ?? "unknown";
+  const allowed = await consumeRateLimit(
+    supabase,
+    `auth:signup:${ip}`,
+    SIGNUP_MAX,
+    SIGNUP_WINDOW_S,
+  );
+  if (!allowed) {
+    return { ok: false, error: RATE_LIMIT_COPY };
+  }
+
   const origin = await getOrigin();
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
@@ -121,8 +174,12 @@ export async function signUp(
 
   // Email confirmation disabled in the project: user is signed in immediately.
   if (data.user) {
+    const next = safeNextPath(formData.get("next"));
     const count = await membershipCountForUser(data.user.id);
-    redirect(count > 0 ? "/dashboard" : "/onboarding");
+    if (count > 0) {
+      redirect(next ?? "/dashboard");
+    }
+    redirect("/onboarding");
   }
 
   return { ok: true, sent: true, email: parsed.data.email };

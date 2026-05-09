@@ -3,19 +3,82 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { consumeRateLimit } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
+import {
+  ALLOWED_COMMUNITY_MANUAL_KEYS,
+  sanitizeCommunityManualResults,
+} from "@/lib/validation/community-manual";
 import { communityInputSchema } from "@/lib/validation/communities";
+import type { CommunityManualResults } from "@/types";
+
+const MUTATION_MAX = 30;
+const MUTATION_WINDOW_S = 60;
+const RATE_LIMIT_COPY = "Too many requests. Please wait a moment and try again.";
+
+export type ManualChecklistSaveState = { ok: boolean; error?: string };
+
+export async function saveCommunityManualChecklist(
+  communityId: string,
+  payload: unknown,
+): Promise<ManualChecklistSaveState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  const parsed = sanitizeCommunityManualResults(payload);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+
+  const { data: existing, error: readErr } = await supabase
+    .from("communities")
+    .select("id, manual_check_results, company_id")
+    .eq("id", communityId)
+    .maybeSingle();
+
+  if (readErr || !existing) {
+    return { ok: false, error: readErr?.message ?? "Community not found." };
+  }
+
+  const prev =
+    (existing.manual_check_results as CommunityManualResults | null) ?? {};
+  const merged: CommunityManualResults = { ...prev, ...parsed.data };
+  for (const k of Object.keys(merged)) {
+    if (!ALLOWED_COMMUNITY_MANUAL_KEYS.has(k)) {
+      delete merged[k];
+    }
+  }
+  const stamp = new Date().toISOString();
+  for (const k of Object.keys(parsed.data)) {
+    const row = merged[k];
+    if (row) merged[k] = { ...row, updated_at: stamp };
+  }
+
+  const { error: upErr } = await supabase
+    .from("communities")
+    .update({ manual_check_results: merged })
+    .eq("id", communityId);
+
+  if (upErr) return { ok: false, error: upErr.message };
+
+  revalidatePath(`/communities/${communityId}`);
+  revalidatePath("/audits");
+
+  return { ok: true };
+}
 
 export type CommunityFormState = {
   ok: boolean;
   error?: string;
-  fieldErrors?: Partial<Record<"name" | "website_url", string>>;
+  fieldErrors?: Partial<Record<"name" | "website_url" | "facility_type", string>>;
 };
 
 function parseForm(formData: FormData) {
   return communityInputSchema.safeParse({
     name: formData.get("name"),
     website_url: formData.get("website_url"),
+    facility_type: formData.get("facility_type"),
   });
 }
 
@@ -23,7 +86,7 @@ function fieldErrorsFrom(zodError: import("zod").ZodError): CommunityFormState["
   const result: CommunityFormState["fieldErrors"] = {};
   for (const issue of zodError.issues) {
     const key = issue.path[0];
-    if (key === "name" || key === "website_url") {
+    if (key === "name" || key === "website_url" || key === "facility_type") {
       result[key] = issue.message;
     }
   }
@@ -45,6 +108,18 @@ export async function createCommunity(
   }
 
   const supabase = await createClient();
+  // Defense-in-depth getUser; see companies/actions.ts comment.
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  const allowed = await consumeRateLimit(
+    supabase,
+    `community:create:${user.id}`,
+    MUTATION_MAX,
+    MUTATION_WINDOW_S,
+  );
+  if (!allowed) return { ok: false, error: RATE_LIMIT_COPY };
+
   const { data, error } = await supabase
     .from("communities")
     .insert({ ...parsed.data, company_id: companyId })
@@ -74,6 +149,17 @@ export async function updateCommunity(
   }
 
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  const allowed = await consumeRateLimit(
+    supabase,
+    `community:update:${user.id}`,
+    MUTATION_MAX,
+    MUTATION_WINDOW_S,
+  );
+  if (!allowed) return { ok: false, error: RATE_LIMIT_COPY };
+
   const { data: existing } = await supabase
     .from("communities")
     .select("company_id")
@@ -94,6 +180,17 @@ export async function updateCommunity(
 
 export async function deleteCommunity(communityId: string): Promise<void> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("You must be signed in.");
+
+  const allowed = await consumeRateLimit(
+    supabase,
+    `community:delete:${user.id}`,
+    MUTATION_MAX,
+    MUTATION_WINDOW_S,
+  );
+  if (!allowed) throw new Error(RATE_LIMIT_COPY);
+
   const { data: existing } = await supabase
     .from("communities")
     .select("company_id")

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { LogOut, User as UserIcon } from "lucide-react";
+import { Building2, LogOut, User as UserIcon } from "lucide-react";
 
 import { signOut } from "@/app/(dashboard)/auth-actions";
 import { Avatar, initialsFor } from "@/components/ui/avatar";
@@ -78,6 +78,15 @@ export function UserMenu({ email, fullName, avatarUrl }: Props) {
           </div>
         </div>
         <div className="flex flex-col p-1">
+          <Link
+            href="/companies"
+            className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => setOpen(false)}
+            role="menuitem"
+          >
+            <Building2 className="h-4 w-4" aria-hidden />
+            Organizations
+          </Link>
           <Link
             href="/settings"
             className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"

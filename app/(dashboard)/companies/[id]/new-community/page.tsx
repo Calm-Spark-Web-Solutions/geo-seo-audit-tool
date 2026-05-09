@@ -49,7 +49,7 @@ export default async function NewCommunityPage({
       <div className="mx-auto w-full max-w-2xl">
         <Card>
           <CardHeader>
-            <CardTitle>Community details</CardTitle>
+            <CardTitle className="text-base">Community details</CardTitle>
             <CardDescription>The website URL is used for crawling.</CardDescription>
           </CardHeader>
           <CardContent>

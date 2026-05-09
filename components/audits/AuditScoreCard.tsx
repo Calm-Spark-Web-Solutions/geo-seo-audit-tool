@@ -1,7 +1,10 @@
 import { Calendar } from "lucide-react";
 
+import { CancelAuditButton } from "@/components/audits/CancelAuditButton";
+import { RetryRunnerButton } from "@/components/audits/RetryRunnerButton";
 import { ProgressBar } from "@/components/audits/ProgressBar";
 import { StatusBadge } from "@/components/audits/StatusBadge";
+import { AUDIT_RUNNING_EXPECTATION } from "@/lib/audit/reader-copy";
 import {
   Card,
   CardContent,
@@ -14,6 +17,12 @@ import type { Audit, AuditStatus } from "@/types";
 export function AuditScoreCard({ audit }: { audit: Audit }) {
   const date = new Date(audit.created_at).toLocaleString();
   const isRunning = audit.status === "pending" || audit.status === "running";
+  const progressTotal = audit.progress_total ?? 0;
+  const indeterminateProgress = isRunning && progressTotal === 0;
+  const retryLikely =
+    audit.status === "pending" &&
+    progressTotal > 0 &&
+    audit.pages_crawled === 0;
 
   return (
     <Card>
@@ -25,19 +34,36 @@ export function AuditScoreCard({ audit }: { audit: Audit }) {
             {date}
           </CardDescription>
         </div>
-        <StatusBadge status={audit.status as AuditStatus} />
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={audit.status as AuditStatus} />
+          {isRunning ? (
+            <>
+              <RetryRunnerButton auditId={audit.id} />
+              <CancelAuditButton auditId={audit.id} />
+            </>
+          ) : null}
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {isRunning ? (
-          <ProgressBar
-            label={
-              audit.status === "pending"
-                ? "Discovering URLs…"
-                : "Auditing pages…"
-            }
-            value={audit.pages_crawled}
-            max={audit.progress_total ?? 0}
-          />
+          <div className="flex flex-col gap-3">
+            <ProgressBar
+              label={
+                retryLikely
+                  ? "Retrying or scoring pages…"
+                  : audit.status === "pending"
+                    ? "Discovering URLs…"
+                    : "Auditing pages…"
+              }
+              value={audit.pages_crawled}
+              max={progressTotal}
+              busy
+              indeterminate={indeterminateProgress}
+            />
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {AUDIT_RUNNING_EXPECTATION}
+            </p>
+          </div>
         ) : null}
         <div className="grid gap-4 sm:grid-cols-4">
           <ScoreBlock label="Overall" value={audit.score} emphasized />

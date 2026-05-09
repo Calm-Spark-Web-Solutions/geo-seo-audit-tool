@@ -9,10 +9,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { safeNextPath } from "@/lib/validation/redirect";
 
-export default function SignupPage() {
+export default async function SignupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
+  const safeNext = safeNextPath(next);
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6">
+    <main
+      id="main"
+      className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6"
+    >
       <Brand size="lg" />
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
@@ -22,7 +32,7 @@ export default function SignupPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <SignupForm />
+          <SignupForm next={safeNext} />
         </CardContent>
       </Card>
       <Link
@@ -31,6 +41,6 @@ export default function SignupPage() {
       >
         Back to home
       </Link>
-    </div>
+    </main>
   );
 }

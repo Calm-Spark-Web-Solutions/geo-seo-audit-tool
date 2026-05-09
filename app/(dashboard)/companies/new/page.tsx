@@ -27,7 +27,7 @@ export default function NewCompanyPage() {
       <div className="mx-auto w-full max-w-2xl">
         <Card>
           <CardHeader>
-            <CardTitle>Organization details</CardTitle>
+            <CardTitle className="text-base">Organization details</CardTitle>
             <CardDescription>Required fields are marked.</CardDescription>
           </CardHeader>
           <CardContent>
