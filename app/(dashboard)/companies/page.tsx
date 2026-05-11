@@ -51,7 +51,7 @@ export default async function CompaniesPage() {
         <EmptyState
           icon={Building2}
           title="No organizations yet"
-          description="Create your first organization to start auditing communities."
+          description="Create your first organization to start visibility scans on communities."
           actions={
             <Button asChild>
               <Link href="/companies/new">Create organization</Link>

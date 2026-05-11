@@ -51,6 +51,7 @@ export type Database = {
           manual_notes: string | null
           score: number | null
           seo_results: Json | null
+          sitemap_category_label: string | null
           url: string
         }
         Insert: {
@@ -64,6 +65,7 @@ export type Database = {
           manual_notes?: string | null
           score?: number | null
           seo_results?: Json | null
+          sitemap_category_label?: string | null
           url: string
         }
         Update: {
@@ -77,6 +79,7 @@ export type Database = {
           manual_notes?: string | null
           score?: number | null
           seo_results?: Json | null
+          sitemap_category_label?: string | null
           url?: string
         }
         Relationships: [
@@ -338,6 +341,17 @@ export type Database = {
           p_window_seconds: number
         }
         Returns: boolean
+      }
+      list_company_members_with_email: {
+        Args: {
+          p_company_id: string
+        }
+        Returns: {
+          user_id: string
+          email: string
+          role: string
+          created_at: string
+        }[]
       }
     }
     Enums: {

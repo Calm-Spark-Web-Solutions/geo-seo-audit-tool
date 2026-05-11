@@ -5,10 +5,10 @@ const PROTECTED_PREFIXES = [
   "/dashboard",
   "/companies",
   "/communities",
-  "/audits",
+  "/visibility-scans",
   "/settings",
   "/onboarding",
-  "/api/audit",
+  "/api/visibility-scans",
   "/api/companies",
 ] as const;
 

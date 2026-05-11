@@ -1,5 +1,5 @@
 /**
- * Resolve the public origin used to POST `/api/audits/[id]/run` from server
+ * Resolve the public origin used to POST `/api/visibility-scans/[id]/run` from server
  * actions. Must match the deployed host so the audit runner is reachable
  * (never localhost on production builds unless you run the server locally).
  */
@@ -16,7 +16,7 @@ export function kickAuditRunnerFireAndForget(auditId: string): void {
   const siteUrl = resolveSiteUrl();
   const runnerSecret = process.env.AUDIT_RUNNER_SECRET?.trim();
   if (!siteUrl || !runnerSecret) return;
-  void fetch(`${siteUrl}/api/audits/${auditId}/run`, {
+  void fetch(`${siteUrl}/api/visibility-scans/${auditId}/run`, {
     method: "POST",
     headers: {
       "x-audit-runner-token": runnerSecret,

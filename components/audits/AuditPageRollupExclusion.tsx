@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { setAuditPageExcludeFromRollup } from "@/app/(dashboard)/audits/[id]/pages/[pageId]/actions";
+import { setAuditPageExcludeFromRollup } from "@/app/(dashboard)/visibility-scans/[id]/pages/[pageId]/actions";
 import {
   Card,
   CardContent,

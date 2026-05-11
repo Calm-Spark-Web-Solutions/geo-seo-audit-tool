@@ -33,7 +33,7 @@ Keyboard (no mouse):
       past sidebar to first heading.
 - [ ] Sidebar nav, `UserMenu`, and `Brand` link are all reachable; focus ring
       is visible against the sidebar background.
-- [ ] On `/audits/[id]/pages/[pageId]`, focus the SEO/GEO tabs: Right Arrow
+- [ ] On `/visibility-scans/[id]/pages/[pageId]`, focus the SEO/GEO tabs: Right Arrow
       switches to GEO and moves focus; Left Arrow returns to SEO; Home/End
       jump to first/last; Tab moves out of the tablist instead of cycling.
 - [ ] `<details>` summaries for CrUX breakdown and check rows toggle with
@@ -55,7 +55,7 @@ Screen reader:
 Color & contrast:
 
 - [ ] Run Axe DevTools (or `npx @axe-core/cli`) against `/dashboard`,
-      `/communities/[id]`, `/audits/[id]`, `/audits/[id]/pages/[pageId]`,
+      `/communities/[id]`, `/visibility-scans/[id]`, `/visibility-scans/[id]/pages/[pageId]`,
       `/login`, `/signup`. Target **0 serious / critical** issues.
 - [ ] Spot-check muted captions, status badges, and ring borders in light +
       dark with Chrome DevTools contrast picker (≥4.5:1 text, ≥3:1 UI).

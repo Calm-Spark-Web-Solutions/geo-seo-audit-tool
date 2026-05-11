@@ -10,10 +10,10 @@
  * documentation pointer, not the runtime source. When you change regions,
  * update this comment AND the literal in each of these routes:
  *
- *   - app/api/audits/[id]/run/route.ts
- *   - app/api/audits/cron-tick/route.ts
- *   - app/api/audits/[id]/snapshot/route.ts
- *   - app/api/audits/[id]/report.pdf/route.ts
+ *   - app/api/visibility-scans/[id]/run/route.ts
+ *   - app/api/visibility-scans/cron-tick/route.ts
+ *   - app/api/visibility-scans/[id]/snapshot/route.ts
+ *   - app/api/visibility-scans/[id]/report.pdf/route.ts
  *
  * Common Supabase → Vercel region matches:
  *   - us-east-1 (default)        →  "iad1"  (Washington, D.C.)

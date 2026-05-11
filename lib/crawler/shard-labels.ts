@@ -4,7 +4,7 @@
  * Real CMSes (especially WordPress + Yoast / Rank Math) split sitemaps by
  * post type — `page-sitemap.xml`, `post-sitemap.xml`, `category-sitemap.xml`,
  * etc. — and we want to surface that as readable categories on the
- * "Run new audit" form.
+ * "Start visibility scan" form.
  *
  * Default selection state: most-useful types are pre-checked, low-signal
  * types (attachments, tags) are off. Unknown types render with a titlecased
@@ -84,6 +84,14 @@ export interface ShardDescriptor {
  * default-checked state. Falls back to titlecasing the filename
  * (`news-sitemap.xml` -> "News") for shards we don't recognize.
  */
+/** Sort key for grouping audit URLs by stored label (lower = earlier). */
+export function categoryLabelSortKey(displayLabel: string): number {
+  if (displayLabel === "Uncategorized") return 10000;
+  const spec = KNOWN_SHARDS.find((s) => s.label === displayLabel);
+  if (spec) return spec.priority;
+  return UNKNOWN_PRIORITY;
+}
+
 export function describeShard(shardUrl: string): ShardDescriptor {
   const filename = filenameOf(shardUrl);
   for (const spec of KNOWN_SHARDS) {

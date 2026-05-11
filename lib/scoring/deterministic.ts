@@ -1,9 +1,23 @@
 import * as cheerio from "cheerio";
 
 import { normalizeUrl, sameOrigin } from "@/lib/crawler/normalize";
-import type { AuditCheck, CheckResult, FixItem } from "@/types";
+import type {
+  AuditCheck,
+  AuditCheckEvidence,
+  AuditCheckEvidenceItem,
+  CheckResult,
+  FixItem,
+} from "@/types";
 
 import { structuredDataOfflineHeuristics } from "./schema-heuristic";
+
+/** Hard cap on stored evidence items per check (override via AUDIT_EVIDENCE_MAX_ITEMS). */
+function evidenceCap(): number {
+  const raw = process.env.AUDIT_EVIDENCE_MAX_ITEMS?.trim();
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return 50;
+  return Math.min(n, 500);
+}
 
 export interface DeterministicResult {
   seoChecks: AuditCheck[];
@@ -32,7 +46,11 @@ function check(
   label: string,
   result: CheckResult,
   explanation: string,
-  meta?: { category?: string; pillar?: "SEO" | "GEO" },
+  meta?: {
+    category?: string;
+    pillar?: "SEO" | "GEO";
+    evidence?: AuditCheckEvidence;
+  },
 ): AuditCheck {
   return {
     key,
@@ -42,6 +60,9 @@ function check(
     score: scoreFromResult(result),
     ...(meta?.category ? { category: meta.category } : {}),
     ...(meta?.pillar ? { pillar: meta.pillar } : {}),
+    ...(meta?.evidence && meta.evidence.items.length > 0
+      ? { evidence: meta.evidence }
+      : {}),
   };
 }
 
@@ -180,9 +201,26 @@ export function runDeterministicChecks(
 
   const imgs = $("img");
   let missingAlt = 0;
+  const cap = evidenceCap();
+  const missingAltItems: AuditCheckEvidenceItem[] = [];
   imgs.each((_, el) => {
     const alt = $(el).attr("alt");
-    if (alt === undefined || alt.trim() === "") missingAlt += 1;
+    const isMissing = alt === undefined || alt.trim() === "";
+    if (isMissing) {
+      missingAlt += 1;
+      if (missingAltItems.length < cap) {
+        const src = $(el).attr("src")?.trim();
+        if (src) {
+          const abs = normalizeUrl(src, pageUrl) ?? src;
+          const near = $(el).parent().text().replace(/\s+/g, " ").trim();
+          missingAltItems.push({
+            type: "image",
+            src: abs,
+            nearText: near ? snippetForUi(near, 120) : undefined,
+          });
+        }
+      }
+    }
   });
   const imgResult: CheckResult =
     imgs.length === 0 ? "warn" : missingAlt === 0 ? "pass" : "fail";
@@ -192,6 +230,14 @@ export function runDeterministicChecks(
       : missingAlt > 0
         ? `${missingAlt} image(s) missing alt text.`
         : "All images have alt text.";
+  const imgEvidence: AuditCheckEvidence | undefined =
+    missingAltItems.length > 0
+      ? {
+          totalCount: missingAlt,
+          items: missingAltItems,
+          inspector: "images",
+        }
+      : undefined;
 
   let httpsResult: CheckResult = "fail";
   let httpsExplanation = "Could not parse page URL.";
@@ -333,7 +379,8 @@ export function runDeterministicChecks(
         ? "Heading levels appear to skip (e.g. H2→H4); keep a contiguous outline when possible."
         : "Heading levels progress without skipped ranks.";
 
-  const h234Count = $("h2, h3, h4").length;
+  const subheadingEls = $("h2, h3, h4").toArray();
+  const h234Count = subheadingEls.length;
   const subheadResult: CheckResult =
     h234Count >= 2 ? "pass" : h234Count === 1 ? "warn" : "fail";
   const subheadExplanation =
@@ -342,6 +389,21 @@ export function runDeterministicChecks(
       : h234Count === 1
         ? "Only one H2–H4; add more sectional headings where content depth warrants it."
         : "Missing H2–H4 headings; pages often need subheads for skim readers and GEO extraction.";
+  const subheadingItems: AuditCheckEvidenceItem[] = subheadingEls
+    .slice(0, cap)
+    .map((el) => {
+      const level = parseInt(el.tagName[1] ?? "2", 10);
+      const text = $(el).text().replace(/\s+/g, " ").trim();
+      return {
+        type: "heading",
+        level: (level >= 1 && level <= 6 ? level : 2) as 1 | 2 | 3 | 4 | 5 | 6,
+        text: snippetForUi(text, 140),
+      };
+    });
+  const subheadEvidence: AuditCheckEvidence | undefined =
+    subheadingItems.length > 0
+      ? { totalCount: h234Count, items: subheadingItems }
+      : undefined;
 
   let imgRaster = 0;
   let webpSurface = false;
@@ -437,33 +499,123 @@ export function runDeterministicChecks(
       ? "BreadcrumbList present in JSON-LD."
       : "No obvious breadcrumb nav or JSON-LD BreadcrumbList.";
 
+  const titleEvidence: AuditCheckEvidence | undefined = titleLen
+    ? {
+        items: [
+          { type: "kv", label: "Title", value: snippetForUi(titleText, 200) },
+          { type: "kv", label: "Length", value: `${titleLen} chars` },
+        ],
+      }
+    : undefined;
+  const descEvidence: AuditCheckEvidence | undefined = descLen
+    ? {
+        items: [
+          {
+            type: "kv",
+            label: "Meta description",
+            value: snippetForUi(metaDesc, 240),
+          },
+          { type: "kv", label: "Length", value: `${descLen} chars` },
+        ],
+      }
+    : undefined;
+  const h1Evidence: AuditCheckEvidence | undefined =
+    h1Texts.length > 0
+      ? {
+          totalCount: h1Count,
+          items: h1Texts.slice(0, cap).map((text) => ({
+            type: "heading",
+            level: 1,
+            text: snippetForUi(text, 160),
+          })),
+        }
+      : undefined;
+  const canonicalEvidence: AuditCheckEvidence | undefined = canonicalHref
+    ? {
+        items: [
+          { type: "kv", label: "Canonical", value: snippetForUi(canonicalHref, 200) },
+        ],
+      }
+    : undefined;
+  const ogEvidence: AuditCheckEvidence | undefined =
+    ogTitle || ogDesc || ogImage
+      ? {
+          items: [
+            ...(ogTitle
+              ? [
+                  {
+                    type: "kv" as const,
+                    label: "og:title",
+                    value: snippetForUi(ogTitle, 160),
+                  },
+                ]
+              : []),
+            ...(ogDesc
+              ? [
+                  {
+                    type: "kv" as const,
+                    label: "og:description",
+                    value: snippetForUi(ogDesc, 200),
+                  },
+                ]
+              : []),
+            ...(ogImage
+              ? [
+                  {
+                    type: "kv" as const,
+                    label: "og:image",
+                    value: snippetForUi(ogImage, 200),
+                  },
+                ]
+              : []),
+          ],
+        }
+      : undefined;
+  const twitterEvidence: AuditCheckEvidence | undefined = twitterCard
+    ? { items: [{ type: "kv", label: "twitter:card", value: twitterCard }] }
+    : undefined;
+  const viewportEvidence: AuditCheckEvidence | undefined = viewportMeta
+    ? { items: [{ type: "kv", label: "viewport", value: viewportMeta }] }
+    : undefined;
+  const robotsEvidence: AuditCheckEvidence | undefined = robotsMeta
+    ? { items: [{ type: "kv", label: "robots", value: robotsMeta }] }
+    : undefined;
+  const langEvidence: AuditCheckEvidence | undefined = htmlLangRaw
+    ? { items: [{ type: "kv", label: "html lang", value: htmlLangRaw }] }
+    : undefined;
+
   const seoChecks: AuditCheck[] = [
     check("html_lang", "Document language (<html lang>)", langResult, langExplanation, {
       category: "Internationalization",
       pillar: "SEO",
+      evidence: langEvidence,
     }),
     check("title_length", "Title tag length", titleResult, titleExplanation, {
       category: "SEO — on-page",
       pillar: "SEO",
+      evidence: titleEvidence,
     }),
     check(
       "meta_description",
       "Meta description length",
       descResult,
       descExplanation,
-      { category: "SEO — on-page", pillar: "SEO" },
+      { category: "SEO — on-page", pillar: "SEO", evidence: descEvidence },
     ),
     check("h1_count", "Single H1", h1Result, h1Explanation, {
       category: "SEO — on-page",
       pillar: "SEO",
+      evidence: h1Evidence,
     }),
     check("heading_outline", "Heading level outline", hierarchyResult, hierarchyExplanation, {
       category: "SEO — on-page",
       pillar: "SEO",
+      evidence: subheadEvidence,
     }),
     check("subheading_depth", "H2–H4 structure", subheadResult, subheadExplanation, {
       category: "SEO — on-page",
       pillar: "SEO",
+      evidence: subheadEvidence,
     }),
     check("breadcrumb_nav", "Breadcrumb navigation", crumbResult, crumbExplanation, {
       category: "SEO — on-page",
@@ -480,6 +632,7 @@ export function runDeterministicChecks(
     check("img_alt", "Image alt text", imgResult, imgExplanation, {
       category: "Accessibility & media",
       pillar: "GEO",
+      evidence: imgEvidence,
     }),
     check("https", "HTTPS", httpsResult, httpsExplanation, {
       category: "Crawlability",
@@ -488,22 +641,27 @@ export function runDeterministicChecks(
     check("canonical", "Canonical link", canonicalResult, canonicalExplanation, {
       category: "Crawlability",
       pillar: "SEO",
+      evidence: canonicalEvidence,
     }),
     check("viewport", "Mobile viewport", viewportResult, viewportExplanation, {
       category: "Site performance",
       pillar: "SEO",
+      evidence: viewportEvidence,
     }),
     check("robots_meta", "Robots meta", robotsResult, robotsExplanation, {
       category: "Crawlability",
       pillar: "SEO",
+      evidence: robotsEvidence,
     }),
     check("og_tags", "Open Graph tags", ogResult, ogExplanation, {
       category: "Social metadata",
       pillar: "SEO",
+      evidence: ogEvidence,
     }),
     check("twitter_card", "Twitter card", twitterResult, twitterExplanation, {
       category: "Social metadata",
       pillar: "SEO",
+      evidence: twitterEvidence,
     }),
     check("hreflang", "hreflang alternates", hreflangResult, hreflangExplanation, {
       category: "Internationalization",
@@ -556,15 +714,34 @@ export function runDeterministicChecks(
         : "All JSON-LD blocks parse as valid JSON.";
 
   let internalLinks = 0;
+  const seenHrefs = new Set<string>();
+  const linkItems: AuditCheckEvidenceItem[] = [];
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href");
     if (!href) return;
     const abs = normalizeUrl(href, pageUrl);
-    if (abs && sameOrigin(pageUrl, abs)) internalLinks += 1;
+    if (abs && sameOrigin(pageUrl, abs)) {
+      internalLinks += 1;
+      if (!seenHrefs.has(abs) && linkItems.length < cap) {
+        seenHrefs.add(abs);
+        const anchor = $(el).text().replace(/\s+/g, " ").trim();
+        const rel = $(el).attr("rel")?.trim();
+        linkItems.push({
+          type: "link",
+          url: abs,
+          anchor: anchor ? snippetForUi(anchor, 120) : undefined,
+          ...(rel ? { rel } : {}),
+        });
+      }
+    }
   });
   const linkResult: CheckResult =
     internalLinks >= 5 ? "pass" : internalLinks >= 2 ? "warn" : "fail";
   const linkExplanation = `Found ${internalLinks} internal link(s) to the same site. Aim for at least 5 for strong internal linking.`;
+  const linkEvidence: AuditCheckEvidence | undefined =
+    linkItems.length > 0
+      ? { totalCount: internalLinks, items: linkItems, inspector: "links" }
+      : undefined;
 
   // ---------- structured data (granular) ----------
 
@@ -582,6 +759,19 @@ export function runDeterministicChecks(
         ? `Detected recognized schema types: ${knownHits.slice(0, 8).join(", ")}${knownHits.length > 8 ? ", …" : ""}.`
         : "JSON-LD present but none of our watched schema.org @types surfaced — review markup.";
 
+  const schemaTypeItems: AuditCheckEvidenceItem[] = [...schemaTypes]
+    .sort()
+    .slice(0, cap)
+    .map((schemaType) => ({ type: "schema", schemaType }));
+  const schemaEvidence: AuditCheckEvidence | undefined =
+    schemaTypeItems.length > 0
+      ? {
+          totalCount: schemaTypes.size,
+          items: schemaTypeItems,
+          inspector: "schema",
+        }
+      : undefined;
+
   const hasOrgFamily = schemaTypes.has("Organization")
     || schemaTypes.has("LocalBusiness")
     || schemaTypes.has("MedicalOrganization");
@@ -595,7 +785,11 @@ export function runDeterministicChecks(
       : totalLdBlocks > 0
         ? "Consider Organization or LocalBusiness / MedicalOrganization for brand-location clarity."
         : "No Organization-style entity JSON-LD detected.",
-    { category: "Structured data", pillar: "GEO" },
+    {
+      category: "Structured data",
+      pillar: "GEO",
+      evidence: schemaEvidence,
+    },
   );
 
   const hasWebSite = schemaTypes.has("WebSite");
@@ -606,7 +800,11 @@ export function runDeterministicChecks(
     hasWebSite
       ? "WebSite schema present (ideal for sitelinks / searchAction patterns)."
       : "No WebSite JSON-LD; add sitewide WebSite with publisher linkage when possible.",
-    { category: "Structured data", pillar: "GEO" },
+    {
+      category: "Structured data",
+      pillar: "GEO",
+      evidence: schemaEvidence,
+    },
   );
 
   const hasServiceFaq = schemaTypes.has("Service") || schemaTypes.has("FAQPage");
@@ -617,7 +815,11 @@ export function runDeterministicChecks(
     hasServiceFaq
       ? "Service and/or FAQPage schema detected for rich-result-friendly pages."
       : "Add Service and/or FAQPage JSON-LD on relevant templates.",
-    { category: "Structured data", pillar: "GEO" },
+    {
+      category: "Structured data",
+      pillar: "GEO",
+      evidence: schemaEvidence,
+    },
   );
 
   const hasArticle = schemaTypes.has("Article")
@@ -630,7 +832,11 @@ export function runDeterministicChecks(
     hasArticle
       ? "Article-style schema present for editorial content surfaces."
       : "No Article/BlogPosting schema; add for news/blog templates if applicable.",
-    { category: "Structured data", pillar: "GEO" },
+    {
+      category: "Structured data",
+      pillar: "GEO",
+      evidence: schemaEvidence,
+    },
   );
 
   const hasItemList = schemaTypes.has("ItemList");
@@ -641,7 +847,11 @@ export function runDeterministicChecks(
     hasItemList
       ? "ItemList markup found (often used for catalogs / listings)."
       : "No ItemList schema; optional for programmatic listing hubs.",
-    { category: "Structured data", pillar: "GEO" },
+    {
+      category: "Structured data",
+      pillar: "GEO",
+      evidence: schemaEvidence,
+    },
   );
 
   const napCheck = check(
@@ -651,7 +861,11 @@ export function runDeterministicChecks(
     napSignals
       ? "Local/Medical organization JSON-LD includes address or telephone signals."
       : "Enhance LocalBusiness/MedicalOrganization blocks with structured address + phone when relevant.",
-    { category: "Structured data", pillar: "GEO" },
+    {
+      category: "Structured data",
+      pillar: "GEO",
+      evidence: schemaEvidence,
+    },
   );
 
   const titleLower = titleText.toLowerCase();
@@ -681,7 +895,8 @@ export function runDeterministicChecks(
   }
 
   const listCount = $("ul").length + $("ol").length;
-  const qaHeadings = headings.filter((el) => /\?/.test($(el).text())).length;
+  const qaHeadingEls = headings.filter((el) => /\?/.test($(el).text()));
+  const qaHeadings = qaHeadingEls.length;
   let lqResult: CheckResult;
   let lqExplanation: string;
   if (listCount >= 2 && qaHeadings >= 1) {
@@ -694,6 +909,42 @@ export function runDeterministicChecks(
     lqResult = "fail";
     lqExplanation = "No bullet/numbered lists or Q&A headings; AI surfaces struggle to extract structured answers.";
   }
+  const lqItems: AuditCheckEvidenceItem[] = [
+    { type: "kv", label: "Lists (ul/ol)", value: String(listCount) },
+    { type: "kv", label: "Q&A headings", value: String(qaHeadings) },
+    ...qaHeadingEls.slice(0, cap - 2).map((el): AuditCheckEvidenceItem => {
+      const level = parseInt(el.tagName[1] ?? "2", 10);
+      const text = $(el).text().replace(/\s+/g, " ").trim();
+      return {
+        type: "heading",
+        level: (level >= 1 && level <= 6 ? level : 2) as 1 | 2 | 3 | 4 | 5 | 6,
+        text: snippetForUi(text, 140),
+      };
+    }),
+  ];
+  const lqEvidence: AuditCheckEvidence = {
+    items: lqItems,
+  };
+
+  let faqMatchedText: string | null = null;
+  let faqMatchedLevel: 1 | 2 | 3 | 4 | 5 | 6 = 2;
+  if (qaHeadingEls.length > 0) {
+    const first = qaHeadingEls[0]!;
+    faqMatchedText = $(first).text().replace(/\s+/g, " ").trim();
+    const lvl = parseInt(first.tagName[1] ?? "2", 10);
+    faqMatchedLevel = (lvl >= 1 && lvl <= 6 ? lvl : 2) as 1 | 2 | 3 | 4 | 5 | 6;
+  }
+  const faqEvidence: AuditCheckEvidence | undefined = faqMatchedText
+    ? {
+        items: [
+          {
+            type: "heading",
+            level: faqMatchedLevel,
+            text: snippetForUi(faqMatchedText, 140),
+          },
+        ],
+      }
+    : undefined;
 
   const figures = $("figure").length;
   const captions = $("figcaption").length;
@@ -725,6 +976,7 @@ export function runDeterministicChecks(
     check("faq_heading", "FAQ-style heading", faqResult, faqExplanation, {
       category: "Content readiness",
       pillar: "GEO",
+      evidence: faqEvidence,
     }),
     check("json_ld", "Structured data (JSON-LD)", jsonLdResult, jsonLdExplanation, {
       category: "Structured data",
@@ -742,7 +994,11 @@ export function runDeterministicChecks(
       "Structured data coverage (@types)",
       structuredCoverageResult,
       structuredCoverageExplanation,
-      { category: "Structured data", pillar: "GEO" },
+      {
+        category: "Structured data",
+        pillar: "GEO",
+        evidence: schemaEvidence,
+      },
     ),
     orgCheck,
     siteCheck,
@@ -754,6 +1010,7 @@ export function runDeterministicChecks(
     check("internal_links", "Internal links", linkResult, linkExplanation, {
       category: "Internal linking",
       pillar: "GEO",
+      evidence: linkEvidence,
     }),
     check(
       "entity_consistency",
@@ -767,7 +1024,11 @@ export function runDeterministicChecks(
       "Lists and Q&A",
       lqResult,
       lqExplanation,
-      { category: "Extractability", pillar: "GEO" },
+      {
+        category: "Extractability",
+        pillar: "GEO",
+        evidence: lqEvidence,
+      },
     ),
     check(
       "images_with_captions",

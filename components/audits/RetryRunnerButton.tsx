@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import {
   retryAuditRunner,
   type RetryRunnerState,
-} from "@/app/(dashboard)/audits/[id]/retry-runner-action";
+} from "@/app/(dashboard)/visibility-scans/[id]/retry-runner-action";
 import { Button } from "@/components/ui/button";
 
 const initialState: RetryRunnerState = { ok: true };

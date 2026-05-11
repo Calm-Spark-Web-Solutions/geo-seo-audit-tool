@@ -3,9 +3,13 @@ import { type NextRequest } from "next/server";
 import { applySecurityHeaders } from "@/lib/security/headers";
 import { updateSession } from "@/lib/supabase/middleware";
 
-export async function proxy(request: NextRequest) {
-  // updateSession may return either a redirect or the passthrough response
-  // — applying headers on the way out covers both branches in one place.
+/**
+ * Next.js 16 middleware entry (`proxy.ts`). Refreshes Supabase session cookies
+ * and applies global security headers (HSTS, CSP report-only, etc.).
+ *
+ * See: https://nextjs.org/docs/messages/middleware-to-proxy
+ */
+export default async function proxy(request: NextRequest) {
   const response = await updateSession(request);
   return applySecurityHeaders(response);
 }

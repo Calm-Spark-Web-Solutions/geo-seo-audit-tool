@@ -100,8 +100,8 @@ export default async function CommunityDetailPage({
         actions={
           <>
             <Button asChild>
-              <Link href={`/communities/${typedCommunity.id}/new-audit`}>
-                Run new audit
+              <Link href={`/communities/${typedCommunity.id}/new-visibility-scan`}>
+                Run new visibility scan
               </Link>
             </Button>
             <Button variant="outline" asChild>
@@ -118,16 +118,16 @@ export default async function CommunityDetailPage({
       <AuditTrend audits={typedAudits} />
 
       <div className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Audit history</h2>
+        <h2 className="text-lg font-semibold">Visibility scan history</h2>
         {typedAudits.length === 0 ? (
           <EmptyState
             icon={Gauge}
-            title="No audits yet"
-            description="Run the first audit to populate history and scores."
+            title="No scans yet"
+            description="Run the first visibility scan to populate history and scores."
             actions={
               <Button asChild>
-                <Link href={`/communities/${typedCommunity.id}/new-audit`}>
-                  Run first audit
+                <Link href={`/communities/${typedCommunity.id}/new-visibility-scan`}>
+                  Run first scan
                 </Link>
               </Button>
             }
@@ -158,7 +158,7 @@ export default async function CommunityDetailPage({
                   className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 p-4"
                 >
                   <Link
-                    href={`/audits/${audit.id}`}
+                    href={`/visibility-scans/${audit.id}`}
                     className="flex min-w-0 flex-1 items-center gap-3"
                   >
                     <span className="flex shrink-0 items-center gap-1.5">
@@ -192,7 +192,7 @@ export default async function CommunityDetailPage({
                     <Score label="Total" value={audit.score} bold />
                     {isFailed ? (
                       <Button size="sm" variant="outline" asChild>
-                        <Link href={`/communities/${typedCommunity.id}/new-audit`}>
+                        <Link href={`/communities/${typedCommunity.id}/new-visibility-scan`}>
                           Retry
                         </Link>
                       </Button>

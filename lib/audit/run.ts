@@ -9,7 +9,11 @@ import {
   normalizeUrl,
   sameOrigin,
 } from "@/lib/crawler/normalize";
-import { fetchSitemap, fetchUrlsFromShards } from "@/lib/crawler/sitemap";
+import {
+  buildUrlToSitemapCategoryLabelMap,
+  fetchSitemap,
+  fetchUrlsFromShards,
+} from "@/lib/crawler/sitemap";
 import { recalculateAuditRollupScores } from "@/lib/audit/rollup-scores";
 import {
   categoryScoreEffective,
@@ -17,7 +21,6 @@ import {
 } from "@/lib/scoring/effective-scores";
 import { scoreAndAnalyzePage } from "@/lib/scoring";
 import { runCruxOriginChecks } from "@/lib/scoring/crux";
-import { computeNearDuplicateChecksForBatch } from "@/lib/scoring/near-duplicate";
 import { detectLikelyPasswordGate } from "@/lib/scoring/password-gate";
 import { runSiteWideChecks } from "@/lib/scoring/site-wide";
 
@@ -238,6 +241,19 @@ export async function runAudit({
 
   const urls = await resolveUrls(base, maxPages, shardUrls, targetUrls);
 
+  let categoryByUrl = new Map<string, string>();
+  if (shardUrls && shardUrls.length > 0) {
+    categoryByUrl = await buildUrlToSitemapCategoryLabelMap(
+      shardUrls,
+      base,
+      {
+        timeoutMs: FETCH_TIMEOUT_MS,
+        userAgent: DEFAULT_USER_AGENT,
+      },
+      new Set(urls),
+    );
+  }
+
   await supabase
     .from("audits")
     .update({ progress_total: urls.length })
@@ -308,6 +324,7 @@ export async function runAudit({
           fixes: s.fixes,
           ai_comment: s.aiComment,
           exclude_from_audit_score: excludePage,
+          sitemap_category_label: categoryByUrl.get(s.url) ?? null,
         })
         .select("id")
         .single();
@@ -361,20 +378,13 @@ export async function runAudit({
   // cleanly with progress_total: 0 so the UI does not show "0 / N complete".
   const finalProgressTotal = pagesCrawled === 0 ? 0 : urls.length;
 
-  let nearDuplicateChecks: AuditCheck[] = [];
-  try {
-    nearDuplicateChecks = computeNearDuplicateChecksForBatch(work);
-  } catch {
-    nearDuplicateChecks = [];
-  }
-
   const finalUpdate = await supabase
     .from("audits")
     .update({
       status: "complete",
       pages_crawled: pagesCrawled,
       progress_total: finalProgressTotal,
-      near_duplicate_checks: nearDuplicateChecks,
+      near_duplicate_checks: [],
     })
     .eq("id", auditId);
 

@@ -19,7 +19,7 @@ interface AuditPageRowProps {
 
 /**
  * Compact link row for the audit detail list. The whole row navigates to
- * `/audits/{auditId}/pages/{pageId}` for the full breakdown; the small
+ * `/visibility-scans/{auditId}/pages/{pageId}` for the full breakdown; the small
  * external-link affordance stays an `<a>` so users can open the audited
  * URL in a new tab without leaving the list.
  */
@@ -58,7 +58,7 @@ export function AuditPageRow({ auditId, page, prior }: AuditPageRowProps) {
   return (
     <div className="group relative flex items-center gap-3 border-b border-border py-3 transition-colors last:border-0 hover:bg-muted/30">
       <Link
-        href={`/audits/${auditId}/pages/${page.id}`}
+        href={`/visibility-scans/${auditId}/pages/${page.id}`}
         className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-1 -mx-1 outline-none focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={`View detailed audit results for ${page.url}`}
       >

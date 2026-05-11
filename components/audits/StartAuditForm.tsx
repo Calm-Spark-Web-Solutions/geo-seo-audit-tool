@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AlertTriangle, ChevronRight, Info } from "lucide-react";
 import {
   useEffect,
@@ -13,7 +14,7 @@ import { useActionState } from "react";
 import {
   startAudit,
   type StartAuditFormState,
-} from "@/app/(dashboard)/communities/[id]/new-audit/actions";
+} from "@/app/(dashboard)/communities/[id]/new-visibility-scan/actions";
 import { StartAuditButton } from "@/components/audits/StartAuditButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,12 +49,18 @@ interface StartAuditFormProps {
   communityId: string;
   shards: ShardOption[];
   defaultMaxPages: number;
+  /** When true, app enforces active/trialing subscription for audits. */
+  stripeBillingEnabled?: boolean;
+  /** User may start a paid audit run (server action re-checks). */
+  paidAccess?: boolean;
 }
 
 export function StartAuditForm({
   communityId,
   shards,
   defaultMaxPages,
+  stripeBillingEnabled = false,
+  paidAccess = true,
 }: StartAuditFormProps) {
   const [state, formAction] = useActionState(startAudit, initialState);
 
@@ -132,11 +139,33 @@ export function StartAuditForm({
     return out;
   }, [shards, selection]);
 
-  const submitDisabled = overCap || noneSelected;
+  const subscriptionBlocked = stripeBillingEnabled && !paidAccess;
+  const submitDisabled = overCap || noneSelected || subscriptionBlocked;
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
       <input type="hidden" name="community_id" value={communityId} />
+
+      {subscriptionBlocked ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground"
+        >
+          <span className="font-medium text-foreground">
+            Subscription required
+          </span>
+          <span>
+            RankLume needs an active or trialing plan on your account to run
+            new visibility scans.
+          </span>
+          <Link
+            href="/settings"
+            className="w-fit font-medium text-foreground underline underline-offset-4 hover:no-underline"
+          >
+            Open Settings → Plans & billing
+          </Link>
+        </div>
+      ) : null}
 
       {shards.length > 0 ? (
         <fieldset className="flex flex-col gap-2">
@@ -171,7 +200,7 @@ export function StartAuditForm({
       )}
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="max_pages">Maximum pages to audit</Label>
+        <Label htmlFor="max_pages">Maximum pages to scan</Label>
         <div className="flex items-center gap-3">
           <Input
             id="max_pages"
@@ -224,7 +253,7 @@ export function StartAuditForm({
           <span>
             You selected {selectedTotal.toLocaleString()} URLs but the cap is
             set to {maxPages.toLocaleString()}. Lower your selection or raise
-            the cap to start the audit.
+            the cap to start the scan.
           </span>
         </div>
       ) : showRuntimeWarning ? (
@@ -256,7 +285,7 @@ export function StartAuditForm({
 
       {noneSelected ? (
         <p className="text-xs text-destructive">
-          Select at least one URL to start an audit.
+          Select at least one URL to start a visibility scan.
         </p>
       ) : null}
 

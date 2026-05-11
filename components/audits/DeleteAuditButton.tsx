@@ -4,7 +4,7 @@ import { Loader2, Trash2 } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
 
-import { deleteAudit } from "@/app/(dashboard)/audits/[id]/delete-action";
+import { deleteAudit } from "@/app/(dashboard)/visibility-scans/[id]/delete-action";
 import { Button } from "@/components/ui/button";
 
 interface DeleteAuditButtonProps {

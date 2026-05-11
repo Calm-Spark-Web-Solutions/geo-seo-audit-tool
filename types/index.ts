@@ -24,6 +24,13 @@ export interface AuditJob {
   updated_at: string;
 }
 
+/** Latest `audit_jobs` row surfaced on the audit report (runner retries / errors). */
+export interface AuditQueueDiagnostics {
+  lastError: string | null;
+  attempts: number;
+  maxAttempts: number;
+}
+
 export type CheckResult = "pass" | "warn" | "fail";
 
 export type FixPriority = "high" | "medium" | "low";
@@ -92,8 +99,6 @@ export interface Audit {
   site_wide_checks?: AuditCheck[] | null;
   /** Origin-level Chrome UX Report (CrUX) p75 metrics when fetch succeeds. */
   crux_field_checks?: AuditCheck[] | null;
-  /** Near-duplicate page pairs within this audit batch (simhash heuristic). */
-  near_duplicate_checks?: AuditCheck[] | null;
   report_pdf_path: string | null;
   report_generated_at: string | null;
   engine_version?: number;
@@ -112,6 +117,31 @@ export interface AuditCheckCruxSample {
   unit: "ms" | "cls";
 }
 
+export type AuditCheckEvidenceItem =
+  | { type: "link"; url: string; anchor?: string; rel?: string }
+  | { type: "image"; src: string; alt?: string; nearText?: string }
+  | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; text: string }
+  | { type: "schema"; schemaType: string; sample?: string }
+  | {
+      type: "psi_audit";
+      id: string;
+      title: string;
+      result: CheckResult;
+      score: number | null;
+      displayValue?: string;
+      description?: string;
+    }
+  | { type: "kv"; label: string; value: string };
+
+/** Optional structured evidence per AuditCheck — renders under the explanation. */
+export interface AuditCheckEvidence {
+  /** Total items found; UI shows "+N more" when items.length < totalCount. */
+  totalCount?: number;
+  items: AuditCheckEvidenceItem[];
+  /** Inspector route slug (under per-page audit detail) where the full list lives. */
+  inspector?: "links" | "images" | "schema" | "lighthouse";
+}
+
 export interface AuditCheck {
   key: string;
   label: string;
@@ -127,6 +157,8 @@ export interface AuditCheck {
   pillar?: "SEO" | "GEO";
   /** CrUX p75 value + unit when row is a Field metrics histogram metric. */
   cruxSample?: AuditCheckCruxSample;
+  /** Sample items proving why this row passed/warned/failed. */
+  evidence?: AuditCheckEvidence;
 }
 
 export interface FixItem {
@@ -147,6 +179,8 @@ export interface AuditPage {
   ai_comment: string | null;
   /** When true, this URL is omitted from parent audit-level score averages. */
   exclude_from_audit_score?: boolean;
+  /** Sitemap shard label (e.g. Pages, Posts); null on legacy runs without shards. */
+  sitemap_category_label?: string | null;
   created_at: string;
 }
 
@@ -165,6 +199,14 @@ export type CompanyRole = "owner" | "admin" | "member";
 export interface CompanyMember {
   company_id: string;
   user_id: string;
+  role: CompanyRole;
+  created_at: string;
+}
+
+/** Row from `list_company_members_with_email` RPC (roster in Team UI). */
+export interface CompanyMemberWithEmail {
+  user_id: string;
+  email: string;
   role: CompanyRole;
   created_at: string;
 }

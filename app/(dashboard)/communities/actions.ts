@@ -63,7 +63,7 @@ export async function saveCommunityManualChecklist(
   if (upErr) return { ok: false, error: upErr.message };
 
   revalidatePath(`/communities/${communityId}`);
-  revalidatePath("/audits");
+  revalidatePath("/visibility-scans");
 
   return { ok: true };
 }

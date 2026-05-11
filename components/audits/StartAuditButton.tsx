@@ -19,7 +19,7 @@ export function StartAuditButton({
       disabled={pending || disabled}
       className="min-w-[9rem]"
     >
-      {pending ? "Running audit…" : "Start audit"}
+      {pending ? "Running scan…" : "Start visibility scan"}
     </Button>
   );
 }

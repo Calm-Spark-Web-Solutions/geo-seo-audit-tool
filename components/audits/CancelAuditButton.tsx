@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import {
   cancelAudit,
   type CancelAuditState,
-} from "@/app/(dashboard)/audits/[id]/cancel-action";
+} from "@/app/(dashboard)/visibility-scans/[id]/cancel-action";
 import { Button } from "@/components/ui/button";
 
 const initialState: CancelAuditState = { ok: true };

@@ -55,6 +55,9 @@ export function CheckList({
   checks,
   explanationLayout = "inline",
   scoreDraft,
+  auditId,
+  pageId,
+  hidePassing = false,
 }: {
   title: string;
   checks: AuditCheck[];
@@ -65,9 +68,24 @@ export function CheckList({
     onExcludedChange: (checkKey: string, excluded: boolean) => void;
     disabled?: boolean;
   };
+  /** When set, evidence "View full list" links route to the page inspector subroutes. */
+  auditId?: string;
+  pageId?: string;
+  /** When true, rows with result === "pass" are filtered out before grouping. */
+  hidePassing?: boolean;
 }) {
   if (checks.length === 0) return null;
-  const grouped = groupChecksByCategory(checks);
+  const visibleChecks = hidePassing
+    ? checks.filter((c) => c.result !== "pass")
+    : checks;
+  if (visibleChecks.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No warnings or failures — every check passed in this category.
+      </p>
+    );
+  }
+  const grouped = groupChecksByCategory(visibleChecks);
   const showCategoryHeaders =
     grouped.length > 1 ||
     (grouped.length === 1 && grouped[0]?.category !== "General");
@@ -100,6 +118,8 @@ export function CheckList({
                             }
                           : c
                       }
+                      auditId={auditId}
+                      pageId={pageId}
                       scoreToggle={
                         scoreDraft
                           ? {
