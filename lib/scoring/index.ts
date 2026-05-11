@@ -4,7 +4,6 @@ import {
   generatePageAnalysis,
   type AnthropicAnalysis,
 } from "./anthropic-scores";
-import { runAxeChecks } from "./axe-a11y";
 import { runDeterministicChecks, scoreFromResult } from "./deterministic";
 import { runPsi } from "./psi";
 
@@ -45,8 +44,7 @@ function fixesFromChecks(checks: AuditCheck[]): FixItem[] {
 
 /**
  * Layered audit engine: deterministic cheerio checks, optional Google PSI,
- * optional Anthropic analysis, optional axe-core in jsdom when AUDIT_RUN_AXE is set.
- * Each layer is independent — failures degrade gracefully.
+ * optional Anthropic analysis. Each layer is independent — failures degrade gracefully.
  */
 export async function scoreAndAnalyzePage({
   url,
@@ -57,12 +55,11 @@ export async function scoreAndAnalyzePage({
 }): Promise<PageScore> {
   const det = runDeterministicChecks(html, url);
 
-  // PSI, Anthropic, and optional axe-core run concurrently; Anthropic consumes
-  // deterministic summaries only so the call shape stays cache-friendly.
-  const [psi, ai, axeChecks]: [
+  // PSI and Anthropic run concurrently; Anthropic consumes deterministic
+  // summaries only so the call shape stays cache-friendly.
+  const [psi, ai]: [
     Awaited<ReturnType<typeof runPsi>>,
     AnthropicAnalysis,
-    Awaited<ReturnType<typeof runAxeChecks>>,
   ] = await Promise.all([
     runPsi(url),
     generatePageAnalysis({
@@ -72,11 +69,10 @@ export async function scoreAndAnalyzePage({
       geoChecks: det.geoChecks,
       fixes: det.fixes,
     }),
-    runAxeChecks(html, url),
   ]);
 
   const seoChecks: AuditCheck[] = [...det.seoChecks, ...psi.seo];
-  const geoChecks: AuditCheck[] = [...det.geoChecks, ...psi.geo, ...ai.geo, ...axeChecks];
+  const geoChecks: AuditCheck[] = [...det.geoChecks, ...psi.geo, ...ai.geo];
 
   const seoScore = categoryScore(seoChecks);
   const geoScore = categoryScore(geoChecks);

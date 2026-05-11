@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 // Pin near Supabase to cut per-call round trips during the page loop.
 // Must be a string literal — Next.js's route-segment-config analyzer cannot
-// follow cross-module imports. See lib/runtime/region.ts for the canonical
-// region reference (Supabase us-east-1 → "iad1", eu-west-1 → "dub1", etc.).
+// follow cross-module imports. See lib/config/region.ts for region options.
 export const preferredRegion = "iad1";
 
 /**

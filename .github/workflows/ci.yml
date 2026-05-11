@@ -45,9 +45,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
         run: npm run build
 
-      - name: npm audit (advisory only)
-        # Non-blocking: the README "Known accepted advisories" table
-        # documents the postcss moderate finding. Promote to blocking
-        # once that's resolved or downgraded upstream.
+      - name: npm audit
+        # Fails on high/critical CVEs only. The known postcss finding is
+        # moderate and is not caught by --audit-level=high.
         run: npm audit --audit-level=high
-        continue-on-error: true
