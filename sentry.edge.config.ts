@@ -13,6 +13,7 @@ const dsn = getSentryDsn();
 Sentry.init({
   dsn,
   enabled: Boolean(dsn),
+  environment: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
 
   integrations: [
     Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),

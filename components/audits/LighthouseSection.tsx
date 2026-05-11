@@ -77,11 +77,7 @@ export function LighthouseSection({
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Lighthouse data was not collected for this run. Set{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-              PSI_API_KEY
-            </code>{" "}
-            and re-run the visibility scan to populate this section.
+            Lighthouse data was not collected for this run. Re-run the visibility scan to populate this section.
           </p>
         </CardContent>
       </Card>

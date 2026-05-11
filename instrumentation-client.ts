@@ -15,11 +15,12 @@ const dsn = getSentryDsn();
 Sentry.init({
   dsn,
   enabled: Boolean(dsn),
+  environment: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
 
   integrations: [
     Sentry.browserTracingIntegration(),
     Sentry.browserProfilingIntegration(),
-    Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),
+    Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] }),
   ],
 
   tracesSampleRate: getSentryTracesSampleRate(),

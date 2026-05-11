@@ -74,7 +74,7 @@ export async function retryAuditRunner(
     return {
       ok: false,
       error:
-        "Audit runner is not configured (missing NEXT_PUBLIC_SITE_URL or AUDIT_RUNNER_SECRET).",
+        "Audit runner is not configured. Please contact support.",
     };
   }
 
