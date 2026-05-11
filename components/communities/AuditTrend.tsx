@@ -78,9 +78,9 @@ export function AuditTrend({ audits }: AuditTrendProps) {
           <CardDescription>{subtitle}</CardDescription>
         </div>
       </CardHeader>
-      <div className="h-56 px-2 pb-3 sm:px-4">
+      <div className="min-h-56 w-full min-w-0 px-2 pb-3 sm:px-4">
         {points.length < 2 ? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
             Not enough data yet — run another audit to plot a trend.
           </div>
         ) : (

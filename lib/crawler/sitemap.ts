@@ -262,6 +262,80 @@ export async function fetchUrlsFromShards(
   return collected;
 }
 
+function allNeededUrlsClassified(
+  neededUrls: ReadonlySet<string>,
+  map: Map<string, string>,
+): boolean {
+  for (const u of neededUrls) {
+    if (!map.has(u)) return false;
+  }
+  return true;
+}
+
+/**
+ * Normalized URL → sitemap category label for each URL appearing in the given
+ * shard sitemaps. Same traversal order and dedupe rules as {@link fetchUrlsFromShards}
+ * (first shard wins).
+ *
+ * When `neededUrls` is omitted, every URL in each shard is recorded (legacy behavior).
+ * When `neededUrls` is provided, only those URLs are stored and iteration stops early
+ * once all needed URLs are classified — skipping irrelevant XML rows and often avoiding
+ * extra shard fetches (large performance win vs scanning entire sitemaps).
+ */
+export async function buildUrlToSitemapCategoryLabelMap(
+  shardUrls: string[],
+  baseUrl: string,
+  options: FetchOptions = {},
+  neededUrls?: ReadonlySet<string>,
+): Promise<Map<string, string>> {
+  const origin = originOf(baseUrl);
+  const out = new Map<string, string>();
+  if (!origin || shardUrls.length === 0) return out;
+
+  if (neededUrls !== undefined && neededUrls.size === 0) return out;
+
+  const settings: FetchSettings = {
+    timeout: options.timeoutMs ?? DEFAULT_CRAWL_TIMEOUT_MS,
+    userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+  };
+
+  for (let i = 0; i < shardUrls.length; i += SITEMAP_CONCURRENCY) {
+    const chunk = shardUrls.slice(i, i + SITEMAP_CONCURRENCY);
+
+    const xmls = await pAll(chunk, SITEMAP_CONCURRENCY, async (u) =>
+      sameOrigin(origin, u) ? safeFetch(u, settings) : null,
+    );
+
+    for (let j = 0; j < chunk.length; j += 1) {
+      const shardUrl = chunk[j];
+      const xml = xmls[j];
+      if (!xml) continue;
+      const parsed = safeParse(xml);
+      if (!parsed?.urlset?.url) continue;
+
+      const label = describeShard(shardUrl).label;
+
+      for (const entry of parsed.urlset.url) {
+        const loc = normalizeUrl(extractLoc(entry) ?? "", shardUrl);
+        if (!loc) continue;
+        if (!sameOrigin(origin, loc)) continue;
+        if (isAssetUrl(loc)) continue;
+        if (neededUrls !== undefined && !neededUrls.has(loc)) continue;
+        if (out.has(loc)) continue;
+        out.set(loc, label);
+        if (
+          neededUrls !== undefined &&
+          allNeededUrlsClassified(neededUrls, out)
+        ) {
+          return out;
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
 /**
  * Fetch and parse sitemap(s) for a base URL. Tries `robots.txt`, then common
  * sitemap paths, follows sitemap indexes, and returns a deduped, capped list

@@ -1,4 +1,4 @@
--- InyoCare SEO & GEO Audit Tool — multi-org membership + invites
+-- RankLume SEO & GEO Audit Tool — multi-org membership + invites
 -- Pivots access from `companies.user_id` to `company_members` so a single user
 -- can belong to multiple companies. Existing `companies.user_id` is preserved
 -- as the creator/primary contact.

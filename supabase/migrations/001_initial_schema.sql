@@ -1,4 +1,4 @@
--- InyoCare SEO & GEO Audit Tool — initial schema
+-- RankLume SEO & GEO Audit Tool — initial schema
 -- Run with Supabase CLI: npx supabase db push (or apply in SQL editor)
 
 -- Companies (e.g. "Compass Senior Living")

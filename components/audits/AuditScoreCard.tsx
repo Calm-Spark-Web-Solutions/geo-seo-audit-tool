@@ -1,4 +1,4 @@
-import { Calendar } from "lucide-react";
+import { AlertTriangle, Calendar } from "lucide-react";
 
 import { CancelAuditButton } from "@/components/audits/CancelAuditButton";
 import { RetryRunnerButton } from "@/components/audits/RetryRunnerButton";
@@ -12,9 +12,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { Audit, AuditStatus } from "@/types";
+import type { Audit, AuditQueueDiagnostics, AuditStatus } from "@/types";
 
-export function AuditScoreCard({ audit }: { audit: Audit }) {
+export function AuditScoreCard({
+  audit,
+  queue,
+}: {
+  audit: Audit;
+  queue?: AuditQueueDiagnostics | null;
+}) {
   const date = new Date(audit.created_at).toLocaleString();
   const isRunning = audit.status === "pending" || audit.status === "running";
   const progressTotal = audit.progress_total ?? 0;
@@ -28,7 +34,7 @@ export function AuditScoreCard({ audit }: { audit: Audit }) {
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <CardTitle className="text-xl">Audit results</CardTitle>
+          <CardTitle className="text-xl">Visibility scan results</CardTitle>
           <CardDescription className="flex items-center gap-1.5">
             <Calendar className="h-3.5 w-3.5" aria-hidden />
             {date}
@@ -45,6 +51,29 @@ export function AuditScoreCard({ audit }: { audit: Audit }) {
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        {isRunning && queue?.lastError ? (
+          <div
+            role="status"
+            className="flex gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100"
+          >
+            <AlertTriangle
+              className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400"
+              aria-hidden
+            />
+            <div className="min-w-0 space-y-1">
+              <p className="font-medium">
+                Runner retry — attempt {queue.attempts} of {queue.maxAttempts}
+              </p>
+              <p className="text-xs leading-relaxed opacity-90">
+                {queue.lastError}
+              </p>
+              <p className="text-xs text-muted-foreground dark:text-amber-200/80">
+                The scan may continue automatically. Use Retry runner if it
+                stays stuck.
+              </p>
+            </div>
+          </div>
+        ) : null}
         {isRunning ? (
           <div className="flex flex-col gap-3">
             <ProgressBar
@@ -53,7 +82,7 @@ export function AuditScoreCard({ audit }: { audit: Audit }) {
                   ? "Retrying or scoring pages…"
                   : audit.status === "pending"
                     ? "Discovering URLs…"
-                    : "Auditing pages…"
+                    : "Scanning pages…"
               }
               value={audit.pages_crawled}
               max={progressTotal}

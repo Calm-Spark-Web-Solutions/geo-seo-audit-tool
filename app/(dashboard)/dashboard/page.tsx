@@ -116,13 +116,13 @@ export default async function DashboardPage() {
 
     headerDescription = (
       <>
-        Communities and audits for{" "}
+        Communities and visibility scans for{" "}
         <span className="font-medium text-foreground">{company.name}</span>.
       </>
     );
     communitiesHint = "In this company's portfolio";
     auditsHint = "Runs for communities in this company";
-    avgScoreHintBase = "Audits tied to this company";
+    avgScoreHintBase = "Scans tied to this company";
   } else if (orgCount > 1) {
     const [
       globalCommunity,
@@ -154,7 +154,8 @@ export default async function DashboardPage() {
       communityCountsByCompany[k] = (communityCountsByCompany[k] ?? 0) + 1;
     }
 
-    headerDescription = "Communities and audits across companies you operate or audit.";
+    headerDescription =
+      "Communities and visibility scans across companies you operate or manage.";
     communitiesHint = "Across all companies";
     auditsHint = "All-time runs";
     avgScoreHintBase = "Across recent runs";
@@ -165,8 +166,8 @@ export default async function DashboardPage() {
     recentAudits = [];
     headerDescription = "Create a company profile to start adding communities.";
     communitiesHint = "Create a company to add communities";
-    auditsHint = "No audits yet";
-    avgScoreHintBase = "No audits yet";
+    auditsHint = "No scans yet";
+    avgScoreHintBase = "No scans yet";
   }
 
   const avgScore = (() => {
@@ -185,12 +186,12 @@ export default async function DashboardPage() {
       <>
         <PageHeader
           title="Dashboard"
-          description="Welcome — let's set up your first company so you can audit communities."
+          description="Welcome — let's set up your first company so you can run visibility scans on communities."
         />
         <EmptyState
           icon={Building2}
           title="Create your first company"
-          description="A company groups the communities you manage. You can add team members and run audits once it exists."
+          description="A company groups the communities you manage. You can add team members and run visibility scans once it exists."
           actions={
             <Button asChild>
               <Link href="/companies/new">
@@ -248,12 +249,12 @@ export default async function DashboardPage() {
           value={communityCount ?? 0}
           hint={communitiesHint}
         />
-        <StatTile icon={Activity} label="Audits" value={auditCount ?? 0} hint={auditsHint} />
+        <StatTile icon={Activity} label="Scans" value={auditCount ?? 0} hint={auditsHint} />
         <StatTile
           icon={Gauge}
           label="Avg score"
           value={avgScore ?? "—"}
-          hint={avgScore == null ? "No audits yet" : avgScoreHintBase}
+          hint={avgScore == null ? "No scans yet" : avgScoreHintBase}
         />
       </div>
 
@@ -261,7 +262,7 @@ export default async function DashboardPage() {
         <EmptyState
           icon={Globe2}
           title="Add your first community"
-          description="Communities are the sites you audit. Add one to start running SEO and GEO checks."
+          description="Communities are the sites you scan. Add one to start running SEO and GEO checks."
           actions={
             singleCompanyId ? (
               <Button asChild>
@@ -310,7 +311,7 @@ export default async function DashboardPage() {
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Recent audits</h2>
+          <h2 className="text-lg font-semibold">Recent visibility scans</h2>
           <Link
             href={browseCommunitiesHref}
             className="text-sm text-muted-foreground hover:text-foreground hover:underline"
@@ -321,8 +322,8 @@ export default async function DashboardPage() {
         {audits.length === 0 ? (
           <EmptyState
             icon={Gauge}
-            title="No audits yet"
-            description="Run your first audit from a community page to see it appear here."
+            title="No scans yet"
+            description="Run your first visibility scan from a community page to see it appear here."
             actions={
               <Button asChild>
                 <Link href={browseCommunitiesHref}>Pick a community</Link>
@@ -341,7 +342,7 @@ export default async function DashboardPage() {
                 return (
                   <li key={a.id}>
                     <Link
-                      href={`/audits/${a.id}`}
+                      href={`/visibility-scans/${a.id}`}
                       className="flex items-center justify-between gap-4 px-5 py-3 transition-colors hover:bg-accent"
                     >
                       <div className="flex min-w-0 flex-col gap-0.5">
@@ -386,7 +387,7 @@ export default async function DashboardPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Quick actions</CardTitle>
-          <CardDescription>Common tasks to keep audits flowing.</CardDescription>
+          <CardDescription>Common tasks to keep visibility scans flowing.</CardDescription>
         </CardHeader>
         <div className="flex flex-wrap gap-2 px-6 pb-6">
           <Button asChild>

@@ -138,27 +138,16 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     (priceId ? `unknown_price:${priceId}` : "canceled");
 
   const service = createServiceClient();
-  const { data: existing } = await service
-    .from("subscriptions")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  const payload = {
-    stripe_customer_id: customerId,
-    stripe_sub_id: subscription.id,
-    plan,
-    status: "canceled",
-  };
-
-  if (existing?.id) {
-    await service.from("subscriptions").update(payload).eq("user_id", userId);
-  } else {
-    await service.from("subscriptions").insert({
+  await service.from("subscriptions").upsert(
+    {
       user_id: userId,
-      ...payload,
-    });
-  }
+      stripe_customer_id: customerId,
+      stripe_sub_id: subscription.id,
+      plan,
+      status: "canceled",
+    },
+    { onConflict: "user_id" },
+  );
 }
 
 async function upsertSubscriptionFromStripe({
@@ -176,25 +165,14 @@ async function upsertSubscriptionFromStripe({
   const status = subscription.status;
 
   const service = createServiceClient();
-  const { data: existing } = await service
-    .from("subscriptions")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  const payload = {
-    stripe_customer_id: customerId,
-    stripe_sub_id: subscription.id,
-    plan,
-    status,
-  };
-
-  if (existing?.id) {
-    await service.from("subscriptions").update(payload).eq("user_id", userId);
-  } else {
-    await service.from("subscriptions").insert({
+  await service.from("subscriptions").upsert(
+    {
       user_id: userId,
-      ...payload,
-    });
-  }
+      stripe_customer_id: customerId,
+      stripe_sub_id: subscription.id,
+      plan,
+      status,
+    },
+    { onConflict: "user_id" },
+  );
 }

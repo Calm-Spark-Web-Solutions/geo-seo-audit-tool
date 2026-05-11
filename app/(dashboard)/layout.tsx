@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { Sidebar } from "@/components/layout/Sidebar";
+import { DashboardBody } from "@/components/layout/DashboardBody";
+import { SidebarCollapseProvider } from "@/components/layout/SidebarCollapseContext";
 import { Topbar } from "@/components/layout/Topbar";
+import { loadDashboardAccount } from "@/lib/layout/dashboard-account";
 import { createClient } from "@/lib/supabase/server";
 import type { Company } from "@/types";
 
@@ -34,17 +36,20 @@ export default async function DashboardLayout({
   }
   const companies = (data ?? []) as Company[];
 
+  const { account, quota } = await loadDashboardAccount();
+
   return (
-    <div className="grid min-h-screen grid-rows-[auto_1fr] bg-background">
-      <Topbar companies={companies} />
-      <div className="grid grid-cols-1 md:grid-cols-[15rem_1fr]">
-        <Sidebar companies={companies} />
-        <main id="main" className="min-w-0 p-4 md:p-8">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-            {children}
-          </div>
-        </main>
+    <SidebarCollapseProvider>
+      <div className="flex min-h-screen flex-col bg-background">
+        <Topbar companies={companies} account={account} quota={quota} />
+        <DashboardBody
+          companies={companies}
+          account={account}
+          quota={quota}
+        >
+          {children}
+        </DashboardBody>
       </div>
-    </div>
+    </SidebarCollapseProvider>
   );
 }

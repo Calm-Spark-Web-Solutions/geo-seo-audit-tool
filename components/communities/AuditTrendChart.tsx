@@ -25,6 +25,9 @@ const CHART_KEYS = [
   { key: "geo_score", label: "GEO", stroke: "var(--chart-3)" },
 ] as const;
 
+/** Explicit px height avoids ResponsiveContainer measuring -1 when % height chains break (flex, hydration). */
+const CHART_HEIGHT_PX = 224;
+
 /**
  * Inner chart split out so `AuditTrend` can lazy-load it via
  * `next/dynamic`. Recharts is the single largest client dependency
@@ -33,7 +36,8 @@ const CHART_KEYS = [
  */
 export default function AuditTrendChart({ points }: { points: TrendPoint[] }) {
   return (
-    <ResponsiveContainer width="100%" height="100%">
+    <div className="w-full min-w-0" style={{ height: CHART_HEIGHT_PX }}>
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT_PX}>
       <LineChart
         data={points}
         margin={{ top: 8, right: 16, left: -8, bottom: 4 }}
@@ -79,5 +83,6 @@ export default function AuditTrendChart({ points }: { points: TrendPoint[] }) {
         ))}
       </LineChart>
     </ResponsiveContainer>
+    </div>
   );
 }

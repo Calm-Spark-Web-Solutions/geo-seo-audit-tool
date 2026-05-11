@@ -9,7 +9,7 @@ import {
   savePdfToStorage,
   type SavePdfState,
   type SignedUrlState,
-} from "@/app/(dashboard)/audits/[id]/actions";
+} from "@/app/(dashboard)/visibility-scans/[id]/actions";
 import { Button } from "@/components/ui/button";
 
 const initialSaveState: SavePdfState = { ok: true };
@@ -93,7 +93,7 @@ export function PdfActions({
       <div className="flex flex-wrap items-center gap-2">
         <Button asChild size="sm" variant="outline">
           <a
-            href={`/api/audits/${auditId}/report.pdf`}
+            href={`/api/visibility-scans/${auditId}/report.pdf`}
             target="_blank"
             rel="noopener noreferrer"
           >

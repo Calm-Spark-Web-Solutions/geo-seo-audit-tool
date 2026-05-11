@@ -1,41 +1,35 @@
 import { Brand } from "@/components/layout/Brand";
 import { MobileNavSheet } from "@/components/layout/MobileNavSheet";
 import { UserMenu } from "@/components/layout/UserMenu";
-import { createClient } from "@/lib/supabase/server";
+import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
+import type { DashboardAccount } from "@/lib/layout/dashboard-account";
 import type { Company } from "@/types";
 
-export async function Topbar({ companies }: { companies: Company[] }) {
-  const { email, fullName, avatarUrl } = await loadUser();
-
+export function Topbar({
+  companies,
+  account,
+  quota,
+}: {
+  companies: Company[];
+  account: DashboardAccount | null;
+  quota: AuditQuotaSnapshot;
+}) {
   return (
-    <header className="sticky top-0 z-20 flex h-14 w-full items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur md:px-6">
+    <header className="sticky top-0 z-20 flex h-14 w-full shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur md:hidden">
       <div className="flex min-w-0 items-center gap-3">
-        <MobileNavSheet companies={companies} />
-        <Brand size="md" />
+        <MobileNavSheet companies={companies} account={account} quota={quota} />
+        <div className="md:hidden">
+          <Brand size="md" />
+        </div>
       </div>
-      <UserMenu email={email} fullName={fullName} avatarUrl={avatarUrl} />
+      {/* Account control lives in the desktop sidebar; keep here for small screens only. */}
+      <div className="md:hidden">
+        <UserMenu
+          email={account?.email ?? null}
+          fullName={account?.fullName}
+          avatarUrl={account?.avatarUrl}
+        />
+      </div>
     </header>
   );
-}
-
-async function loadUser() {
-  try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { email: null, fullName: null, avatarUrl: null };
-    }
-    const meta = (user.user_metadata ?? {}) as {
-      full_name?: string;
-      name?: string;
-      avatar_url?: string;
-    };
-    return {
-      email: user.email ?? null,
-      fullName: meta.full_name ?? meta.name ?? null,
-      avatarUrl: meta.avatar_url ?? null,
-    };
-  } catch {
-    return { email: null, fullName: null, avatarUrl: null };
-  }
 }

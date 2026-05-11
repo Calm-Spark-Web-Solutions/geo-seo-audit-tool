@@ -11,7 +11,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-import { saveAuditPageScoreExclusions } from "@/app/(dashboard)/audits/[id]/pages/[pageId]/actions";
+import { saveAuditPageScoreExclusions } from "@/app/(dashboard)/visibility-scans/[id]/pages/[pageId]/actions";
 import { CheckList } from "@/components/audits/CheckList";
 import {
   GEO_SECTION_DESCRIPTION,
@@ -101,6 +101,9 @@ export function SeoGeoCheckTabs({
   const [draftSeo, setDraftSeo] = useState(() => mapChecksToExcluded(seo));
   const [draftGeo, setDraftGeo] = useState(() => mapChecksToExcluded(geo));
   const [saving, setSaving] = useState(false);
+  // Default to hiding passing rows on the checks view — most pages have many
+  // passing rows that drown out the actionable findings.
+  const [showPassing, setShowPassing] = useState(false);
   const seoTabRef = useRef<HTMLButtonElement | null>(null);
   const geoTabRef = useRef<HTMLButtonElement | null>(null);
 
@@ -174,6 +177,9 @@ export function SeoGeoCheckTabs({
   const activeDescription =
     pillar === "seo" ? SEO_SECTION_DESCRIPTION : GEO_SECTION_DESCRIPTION;
   const activeChecks = pillar === "seo" ? seo : geo;
+  const activePassingCount = activeChecks.filter(
+    (c) => c.result === "pass",
+  ).length;
 
   async function onSaveScoreSelections() {
     if (!auditId || !pageId) return;
@@ -275,9 +281,25 @@ export function SeoGeoCheckTabs({
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">{activeTitle}</CardTitle>
-          <CardDescription>{activeDescription}</CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between gap-3 pb-3">
+          <div className="min-w-0 space-y-1">
+            <CardTitle className="text-base">{activeTitle}</CardTitle>
+            <CardDescription>{activeDescription}</CardDescription>
+          </div>
+          {activePassingCount > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPassing((v) => !v)}
+              className="shrink-0"
+              aria-pressed={showPassing}
+            >
+              {showPassing
+                ? `Hide ${activePassingCount} passing`
+                : `Show ${activePassingCount} passing`}
+            </Button>
+          ) : null}
         </CardHeader>
         <CardContent
           id="pillar-panel-checks"
@@ -294,6 +316,9 @@ export function SeoGeoCheckTabs({
               title=""
               checks={activeChecks}
               explanationLayout="collapsible"
+              auditId={auditId}
+              pageId={pageId}
+              hidePassing={!showPassing}
               scoreDraft={
                 scoreEditing
                   ? {

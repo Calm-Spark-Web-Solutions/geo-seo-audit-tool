@@ -50,7 +50,7 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {PUBLIC_TIERS.map((tier) => {
           const monthlyReady = Boolean(getStripePriceId(tier.monthlyKey));
           const yearlyReady = Boolean(getStripePriceId(tier.yearlyKey));

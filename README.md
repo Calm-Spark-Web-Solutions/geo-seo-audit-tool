@@ -1,6 +1,6 @@
-# InyoCare SEO & GEO Audit Tool
+# RankLume
 
-A full-stack web application for InyoCare to run AI-powered SEO and GEO (Generative Engine Optimization) audits on senior living community websites. Supports multi-company, multi-community management with audit history, PDF reporting, and billing via Stripe.
+A full-stack web application (**RankLume**) for AI-powered SEO and GEO (Generative Engine Optimization) audits on senior living community websites. Supports multi-company, multi-community management with visibility scan history, PDF reporting, and billing via Stripe.
 
 ---
 
@@ -38,10 +38,10 @@ A full-stack web application for InyoCare to run AI-powered SEO and GEO (Generat
 │   │   │   ├── new/page.tsx              # Create company
 │   │   │   └── [id]/page.tsx             # Company detail + communities
 │   │   ├── communities/
-│   │   │   ├── [id]/page.tsx             # Community detail + audit history
-│   │   │   └── [id]/new-audit/page.tsx   # Run new audit
+│   │   │   ├── [id]/page.tsx             # Community detail + visibility scan history
+│   │   │   └── [id]/new-visibility-scan/page.tsx   # Run new visibility scan
 │   │   └── audits/
-│   │       ├── [id]/page.tsx             # Full audit report
+│   │       ├── [id]/page.tsx             # Full visibility scan report
 │   │       └── [id]/export/page.tsx      # PDF export preview
 │   ├── api/
 │   │   ├── audit/
@@ -133,13 +133,13 @@ PSI calls add roughly 15–25 s per page; the runner concurrency is capped at 3 
 |---|---|---|
 | Site-wide probes | `audits.site_wide_checks` | Robots.txt, AI bot rules, sitemap discovery — no dedicated key beyond the crawler |
 | Chrome UX Report (CrUX) | `audits.crux_field_checks` | Enable Chrome UX Report API in Google Cloud; `CRUX_API_KEY` optional (falls back to `PSI_API_KEY`) |
-| Near-duplicate cohort | `audits.near_duplicate_checks` | Simhash pairs across URLs fetched this run — `AUDIT_NEAR_DUP_MAX_PAGES` (0 = off), `AUDIT_NEAR_DUP_HAMMING_MAX`, `AUDIT_NEAR_DUP_MAX_PAIRS` |
 | axe WCAG scans | GEO checks on each page row | `AUDIT_RUN_AXE=1` or `true`. Runs in jsdom (not a full browser) — some pages time out or fail; use `AUDIT_RUN_AXE_TIMEOUT_MS` (3–120s, default 25s), `AUDIT_RUN_AXE_DEBUG=1`, or Lighthouse in the browser for definitive a11y. |
+| Per-check evidence samples | `audit_pages.seo_results[].evidence`, `geo_results[].evidence` | Inline samples (anchors, missing-alt images, schema @types, failing Lighthouse audits) that power the scan-detail inspectors. Cap per check via `AUDIT_EVIDENCE_MAX_ITEMS` (default `50`, max `500`). |
 
-### Three kinds of audit findings
+### Three kinds of scan findings
 
-1. **Automated results (each run)** — Per-page SEO/GEO JSON on `audit_pages`, plus origin-level blobs on `audits` (`site_wide_checks`, `crux_field_checks`, `near_duplicate_checks`). Empty sections mean the engine skipped that layer (missing keys, timeouts, quotas, insufficient CrUX coverage, or env disabled) — **not** a human checklist omission.
-2. **Expert checklist (human sign-off, per community)** — Coarse rows in [`lib/checklists/community-manual.ts`](geo-seo-audit-tool/lib/checklists/community-manual.ts); saved as `communities.manual_check_results`. Edited **only from the community page** (`/communities/[id]`); not inlined on `/audits` web routes. **PDF exports** may still bundle the checklist. Saving once **prunes JSON keys** that belonged to retired template rows so the DB stays tidy.
+1. **Automated results (each run)** — Per-page SEO/GEO JSON on `audit_pages`, plus origin-level blobs on `audits` (`site_wide_checks`, `crux_field_checks`). Empty sections mean the engine skipped that layer (missing keys, timeouts, quotas, insufficient CrUX coverage, or env disabled) — **not** a human checklist omission.
+2. **Expert checklist (human sign-off, per community)** — Coarse rows in [`lib/checklists/community-manual.ts`](geo-seo-audit-tool/lib/checklists/community-manual.ts); saved as `communities.manual_check_results`. Edited **only from the community page** (`/communities/[id]`); not inlined on `/visibility-scans` web routes. **PDF exports** may still bundle the checklist. Saving once **prunes JSON keys** that belonged to retired template rows so the DB stays tidy.
 3. **Per-page `manual_notes`** — Free-form reviewer notes stored on [`audit_pages.manual_notes`](geo-seo-audit-tool/types/database.ts); independent of both automated checks and the expert checklist.
 
 ---
@@ -245,8 +245,9 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
 
 ### 2. Company & Community Management
 - Create / edit / delete companies
+- **Team:** owners and admins invite teammates under **Settings → Team Management** — per-organization invites, or **bulk invite** across selected organizations (same email and role; each organization still gets its own accept link at `/invite/<token>`). **Settings → Organizations** is a compact hub for every membership; `/companies` remains the full list.
 - Add multiple communities per company
-- Each community has its own website URL and audit history
+- Each community has its own website URL and visibility scan history
 
 ### 3. Site Crawling
 - **Step 1:** Try fetching `sitemap.xml` or `sitemap_index.xml`
@@ -291,23 +292,23 @@ Each check returns: `pass | warn | fail` + a one-line explanation.
 - Full pass/fail breakdown per page
 - Prioritized fix list (high / medium / low)
 - Expert checklist edits live on **community detail** (`/communities/[id]`); optional per-page free-form notes (`manual_notes`) on audit pages
-- Score trend chart (audit history)
+- Score trend chart (visibility scan history)
 - Compare two audits side by side
 
 ### 7. PDF Export
-- Branded InyoCare report template via `@react-pdf/renderer`
+- Branded RankLume report template via `@react-pdf/renderer`
 - Includes: summary scorecard, automated site-wide/CrUX/near-dup sections, **expert checklist appendix** from community snapshot, per-check results, fix list, per-page notes when supplied
 - Uploaded to Supabase Storage
 - Shareable download link generated
 
-### 8. Realtime Audit Progress
+### 8. Realtime visibility scan progress
 - Supabase Realtime subscription on the `audits` table
 - Live progress bar updates as each page is analyzed
 - No polling required
 
 ### 9. Stripe Billing (subscriptions tracked; usage limits not enforced yet)
 - **Tiers:** Residence, Community, and Portfolio (monthly / yearly) plus **Partner program** (invite-oriented label—avoid calling it an “internal discount” in customer-facing copy).
-- **Settings (`/settings`):** pricing cards → Stripe Checkout; **Manage billing** opens the Stripe Customer Portal when a `stripe_customer_id` exists.
+- **Settings (`/settings`):** Admin sections include **Billing** (pricing cards → Stripe Checkout; **Manage billing** opens the Stripe Customer Portal when a `stripe_customer_id` exists), **Team Management** (invites + bulk invite), and **Organizations** (membership hub). When the `tab` query is omitted, Billing stays the default; Stripe success URLs continue to use `/settings?billing=success`.
 - **`POST /api/stripe/webhook`:** verifies signatures and upserts `public.subscriptions` with the **service role** key (`plan` stores a slug such as `community_monthly`; status mirrors Stripe).
 - **Partner checkout button:** hidden by default; set `NEXT_PUBLIC_SHOW_PARTNER_CHECKOUT=1` and `STRIPE_PRICE_PARTNER_MONTHLY` when you want signed-in users to self-serve that tier.
 - **Dashboard setup:** [docs/stripe-dashboard-setup.md](docs/stripe-dashboard-setup.md) — create Products/Prices (test mode first), enable Customer Portal, register webhook events (`checkout.session.completed`, `customer.subscription.*`).
@@ -320,12 +321,12 @@ Each check returns: `pass | warn | fail` + a one-line explanation.
 ```
 User enters URL
       ↓
-API: /api/audit/crawl
+Start scan → server probes sitemap / crawler (see `startAudit` action)
   → Fetch sitemap.xml
   → Fallback: crawl from homepage
   → Return list of URLs (max 50)
       ↓
-API: /api/audit/analyze (called per page)
+`POST /api/visibility-scans/[id]/run` scores each URL
   → Fetch page HTML
   → Send to Anthropic API with audit prompt
   → Parse JSON response
@@ -335,7 +336,7 @@ API: /api/audit/analyze (called per page)
 Supabase Realtime
   → Pushes progress updates to frontend
       ↓
-Audit complete
+Scan complete
   → Full report rendered on screen
   → Option to export PDF → saved to Supabase Storage
 ```
@@ -347,14 +348,14 @@ Audit complete
 | Route | Description |
 |---|---|
 | `/login` | Sign in |
-| `/dashboard` | Overview — all companies, scores, recent audits |
+| `/dashboard` | Overview — all companies, scores, recent visibility scans |
 | `/companies` | List all companies |
 | `/companies/new` | Create a new company |
 | `/companies/[id]` | Company detail — communities + scores |
-| `/communities/[id]` | Community detail — audit history + score trend |
-| `/communities/[id]/new-audit` | Run a new audit |
-| `/audits/[id]` | Full audit report |
-| `/audits/[id]/export` | PDF export preview + download |
+| `/communities/[id]` | Community detail — visibility scan history + score trend |
+| `/communities/[id]/new-visibility-scan` | Run a new visibility scan |
+| `/visibility-scans/[id]` | Full visibility scan report |
+| `/visibility-scans/[id]/export` | PDF export preview + download |
 | `/settings` | Account settings, plan, billing portal |
 
 ---
@@ -363,7 +364,7 @@ Audit complete
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/inyocare/audit-tool.git
+git clone <your-repository-url>
 cd audit-tool
 
 # 2. Install dependencies
@@ -382,34 +383,34 @@ npm run dev
 
 ---
 
-## Audit Runner
+## Visibility scan runner
 
-The audit pipeline runs as a background job that **must outlive** the originating Server Action's request, so it cannot rely on the user's cookies.
+The scoring pipeline runs as a background job that **must outlive** the originating Server Action's request, so it cannot rely on the user's cookies.
 
-- The `startAudit` server action validates access, enforces the per-org rate limit, refuses to start a duplicate audit while one is still in flight, inserts the `audits` row + an `audit_jobs` row, and finally fires a non-awaited `POST` to `/api/audits/[id]/run` with the shared header `x-audit-runner-token: $AUDIT_RUNNER_SECRET`. The action then redirects to the detail page.
-- `/api/audits/[id]/run` (Node runtime, `maxDuration = 300`) uses a **service-role** Supabase client (`lib/supabase/service.ts`) so RLS is bypassed only for this background work. Access was already enforced in the action. The route delegates to `claimAndRunOne` so the runner lease serializes against any concurrent cron tick.
-- The detail page polls `/api/audits/[id]/snapshot` for live progress (in-flight guard, visibility pause, 3-strike error toast).
+- The `startAudit` server action validates access, enforces the per-org rate limit, refuses to start a duplicate run while one is still in flight, inserts the `audits` row + an `audit_jobs` row, and finally fires a non-awaited `POST` to `/api/visibility-scans/[id]/run` with the shared header `x-audit-runner-token: $AUDIT_RUNNER_SECRET`. The action then redirects to the detail page.
+- `/api/visibility-scans/[id]/run` (Node runtime, `maxDuration = 300`) uses a **service-role** Supabase client (`lib/supabase/service.ts`) so RLS is bypassed only for this background work. Access was already enforced in the action. The route delegates to `claimAndRunOne` so the runner lease serializes against any concurrent cron tick.
+- The detail page polls `/api/visibility-scans/[id]/snapshot` for live progress (in-flight guard, visibility pause, 3-strike error toast).
 
 Required environment variables: `SUPABASE_SERVICE_ROLE_KEY`, `AUDIT_RUNNER_SECRET`, `NEXT_PUBLIC_SITE_URL` (or Vercel injects `VERCEL_URL`), and `CRON_SECRET` for scheduled queue ticks.
 
 ### Queue & resilience (Phase 10)
 
-The runner used to be HTTP fire-and-forget — if Vercel killed the function or the network blipped, audits silently stuck in `running`. Phase 10 makes the system durable without adding a new vendor.
+The runner used to be HTTP fire-and-forget — if Vercel killed the function or the network blipped, scans silently stuck in `running`. Phase 10 makes the system durable without adding a new vendor.
 
-- **Durable queue.** `audit_jobs` (migration `009_audit_ops.sql`) holds one row per audit run with `status`, `attempts`, `max_attempts`, `lease_until`, `last_error`. A unique partial index on `(audit_id) where status in ('queued','running')` gives idempotency: double-clicking *Run new audit* never produces two jobs.
+- **Durable queue.** `audit_jobs` (migration `009_audit_ops.sql`) holds one row per visibility scan run with `status`, `attempts`, `max_attempts`, `lease_until`, `last_error`. A unique partial index on `(audit_id) where status in ('queued','running')` gives idempotency: double-clicking *Start visibility scan* never produces two jobs.
 - **Lease window.** A runner claims a job by atomically flipping `status = 'running'` and writing `lease_until = now() + 8 minutes`, comfortably longer than the route's 300 s `maxDuration`. Once the lease expires the job is reapable.
-- **Vercel Cron tick.** `vercel.json` schedules `/api/audits/cron-tick` once a minute. The route authorizes by `Authorization: Bearer $CRON_SECRET` (auto-injected by Vercel) or the existing `x-audit-runner-token` for manual ops. Each tick claims up to 3 queued / abandoned-lease jobs and runs them; this is what recovers a Vercel-killed runner.
+- **Vercel Cron tick.** `vercel.json` schedules `/api/visibility-scans/cron-tick` once a minute. The route authorizes by `Authorization: Bearer $CRON_SECRET` (auto-injected by Vercel) or the existing `x-audit-runner-token` for manual ops. Each tick claims up to 3 queued / abandoned-lease jobs and runs them; this is what recovers a Vercel-killed runner.
 - **Retry policy.** Default `max_attempts = 3`. After a thrown error, the queue helper requeues (`status = 'queued'`, `lease_until = null`) and resets `audits.status = 'pending'` so the UI doesn't flash "failed" between attempts. Once attempts are exhausted, the helper marks the job `failed` and calls `markAuditFailed`.
-- **Cancel semantics.** A *Cancel* button appears on `AuditScoreCard` whenever the audit is `pending` or `running`. The action sets `audits.status = 'cancelled'`; the running runner observes this between scoring batches (typically within ~25 s) and exits cleanly without clobbering `pages_crawled` / `progress_total` / scores. The queue helper then marks the job `cancelled`. No retry on cancel — it is terminal by user intent.
-- **Per-org rate limit.** `consume_rate_limit(...)` (security-definer, atomic `select for update`) caps audit starts at **100 per company per hour**. Exhaustion returns a friendly error toast; the audit row is never inserted.
+- **Cancel semantics.** A *Cancel* button appears on `AuditScoreCard` whenever the scan is `pending` or `running`. The action sets `audits.status = 'cancelled'`; the running runner observes this between scoring batches (typically within ~25 s) and exits cleanly without clobbering `pages_crawled` / `progress_total` / scores. The queue helper then marks the job `cancelled`. No retry on cancel — it is terminal by user intent.
+- **Per-org rate limit.** `consume_rate_limit(...)` (security-definer, atomic `select for update`) caps visibility scan starts at **100 per company per hour**. Exhaustion returns a friendly error toast; the `audits` row is never inserted.
 - **`cancelled` status.** `AuditStatus` now includes `'cancelled'`; `StatusBadge` renders it as a muted secondary badge. The community trend chart (`AuditTrend`) only plots `complete` audits, so cancelled runs do not pollute history.
 
 ### Category & URL selection (Phase 11)
 
-Audits no longer hard-cap at 10 pages with no user input. The new-audit page probes the site's sitemap server-side and renders a category picker with **per-URL checkboxes** plus a configurable URL cap.
+Audits no longer hard-cap at 10 pages with no user input. The new visibility scan page probes the site's sitemap server-side and renders a category picker with **per-URL checkboxes** plus a configurable URL cap.
 
 - **Sitemap shards become categories.** `lib/crawler/sitemap.ts → fetchSitemapShards` walks `robots.txt` and the common sitemap paths, follows `sitemapindex` files, and returns one shard per leaf `urlset` along with its full URL list. Friendly labels (`Pages`, `Posts`, `Categories`, `Products`, `Tags`, `Authors`, `Attachments`, plus titlecased fallbacks) and sort priority come from `lib/crawler/shard-labels.ts`. Sites with only a flat sitemap collapse to a single "All pages" shard; sites with no sitemap render a fallback notice and the runner falls back to a same-origin BFS crawl.
-- **Per-URL picker.** `components/audits/StartAuditForm.tsx` renders each category as a native `<details>` disclosure containing a scrollable checkbox list of every URL in the shard. The shard header has a select-all / clear / indeterminate parent checkbox, and the page slices each shard's URL list to a **1,000-URL preview ceiling** (matches the audit hard cap). Shards with more URLs surface a "Showing first N of M URLs" footer.
+- **Per-URL picker.** [`components/audits/StartAuditForm.tsx`](geo-seo-audit-tool/components/audits/StartAuditForm.tsx) renders each category as a native `<details>` disclosure containing a scrollable checkbox list of every URL in the shard. The shard header has a select-all / clear / indeterminate parent checkbox, and the page slices each shard's URL list to a **1,000-URL preview ceiling** (matches the per-run URL hard cap). Shards with more URLs surface a "Showing first N of M URLs" footer.
 - **Form guards.** `max_pages` numeric input (default 100, range 1..1000) plus a live "Plan" footer summing the deduped union of selected URLs. The form blocks submit when zero URLs are selected and when the selection exceeds `max_pages`. Selecting more than ~50 URLs adds a cost note; more than ~300 surfaces a hard runtime warning that the run may exceed the 300 s function timeout.
 - **Persistence.** Migration `010_audit_selection.sql` adds `audits.max_pages int` and `audits.shard_urls text[]`. Migration `011_audit_target_urls.sql` adds `audits.target_urls text[]` — the explicit page-URL allowlist. All three columns are nullable for back-compat. The `startAudit` action validates `max_pages` (1..1000), enforces same-origin / http(s) on every selected URL, dedupes, and persists `target_urls` (required for new submissions) plus `shard_urls` (analytics metadata: which categories contributed at least one URL).
 - **Runner precedence.** `lib/audit/run.ts → resolveUrls` checks `target_urls` first (re-applies same-origin + asset filters defensively, then dedupes and caps at `max_pages`), then `shard_urls` via `fetchUrlsFromShards`, then the legacy sitemap-then-crawl fallback. Old audit rows without `target_urls` or `shard_urls` continue to use the 10-page legacy default unchanged.
@@ -507,8 +508,8 @@ remove this row.
 | 2 | Company + Community CRUD | 0.5 day |
 | 3 | Sitemap crawler + page fetcher | 1 day |
 | 4 | Anthropic audit logic + API route | 1 day |
-| 5 | Audit report UI + scoring | 1 day |
-| 6 | Realtime progress + audit history | 0.5 day |
+| 5 | Visibility scan report UI + scoring | 1 day |
+| 6 | Realtime progress + visibility scan history | 0.5 day |
 | 7 | PDF export + Supabase Storage ✅ | 1 day |
 | 8 | Hardening: detached runner, error boundary, sitemap same-origin, invite/next, polling resilience ✅ | 0.5 day |
 | 9 | Real audit engine (deterministic + PSI + Anthropic tool-use) + per-page diffs + community trend ✅ | 1.5 days |

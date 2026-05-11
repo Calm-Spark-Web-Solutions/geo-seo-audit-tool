@@ -163,6 +163,59 @@ describe("runDeterministicChecks: missing metadata", () => {
   });
 });
 
+describe("runDeterministicChecks: evidence shape", () => {
+  const result = runDeterministicChecks(GOOD_HTML, PAGE_URL);
+
+  it("attaches link evidence on internal_links with inspector hint", () => {
+    const c = findCheck(result, "internal_links");
+    expect(c).toBeDefined();
+    expect(c?.evidence).toBeDefined();
+    expect(c?.evidence?.inspector).toBe("links");
+    expect((c?.evidence?.items.length ?? 0)).toBeGreaterThan(0);
+    const first = c?.evidence?.items[0];
+    expect(first?.type).toBe("link");
+    if (first && first.type === "link") {
+      expect(first.url.startsWith("http")).toBe(true);
+    }
+  });
+
+  it("attaches schema evidence with the LocalBusiness type", () => {
+    const c = findCheck(result, "structured_data_coverage");
+    expect(c?.evidence?.inspector).toBe("schema");
+    const types = (c?.evidence?.items ?? [])
+      .filter((i) => i.type === "schema")
+      .map((i) => (i.type === "schema" ? i.schemaType : ""));
+    expect(types).toContain("LocalBusiness");
+  });
+
+  it("omits img_alt evidence when no images are missing alt text", () => {
+    const c = findCheck(result, "img_alt");
+    expect(c?.evidence).toBeUndefined();
+  });
+
+  it("captures missing-alt image evidence on a page with bare <img> tags", () => {
+    const html = `<!doctype html>
+<html lang="en">
+  <head><title>Image Missing Alt Test Page Title Long Enough</title></head>
+  <body>
+    <main>
+      <h1>Hero</h1>
+      <p>Lead copy here describing the image below.</p>
+      <img src="/hero.png">
+      <img src="/banner.png" alt="">
+    </main>
+  </body>
+</html>`;
+    const r = runDeterministicChecks(html, PAGE_URL);
+    const c = findCheck(r, "img_alt");
+    expect(c?.result).toBe("fail");
+    expect(c?.evidence?.inspector).toBe("images");
+    const imgs = (c?.evidence?.items ?? []).filter((i) => i.type === "image");
+    expect(imgs.length).toBe(2);
+    expect(c?.evidence?.totalCount).toBe(2);
+  });
+});
+
 describe("runDeterministicChecks: bad headings page", () => {
   const result = runDeterministicChecks(BAD_HEADINGS_HTML, PAGE_URL);
 

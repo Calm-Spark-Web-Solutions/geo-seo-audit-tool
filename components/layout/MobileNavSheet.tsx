@@ -6,9 +6,19 @@ import { useEffect, useRef, useState } from "react";
 
 import { SidebarContent } from "@/components/layout/SidebarContent";
 import { Button } from "@/components/ui/button";
+import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
+import type { DashboardAccount } from "@/lib/layout/dashboard-account";
 import type { Company } from "@/types";
 
-export function MobileNavSheet({ companies }: { companies: Company[] }) {
+export function MobileNavSheet({
+  companies,
+  account,
+  quota,
+}: {
+  companies: Company[];
+  account: DashboardAccount | null;
+  quota: AuditQuotaSnapshot;
+}) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -85,10 +95,15 @@ export function MobileNavSheet({ companies }: { companies: Company[] }) {
                 <X className="h-5 w-5" aria-hidden />
               </Button>
             </div>
-            <SidebarContent
-              companies={companies}
-              onNavigate={() => setOpen(false)}
-            />
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <SidebarContent
+                companies={companies}
+                account={account}
+                quota={quota}
+                variant="mobile"
+                onNavigate={() => setOpen(false)}
+              />
+            </div>
           </div>
         </div>
       ) : null}

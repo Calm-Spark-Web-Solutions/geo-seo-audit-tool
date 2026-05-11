@@ -3,6 +3,7 @@
 import { ChevronDown, CircleAlert, CircleCheck, CircleX } from "lucide-react";
 import { useState } from "react";
 
+import { CheckEvidence } from "@/components/audits/CheckEvidence";
 import { cn } from "@/lib/utils";
 import type { AuditCheck, CheckResult } from "@/types";
 
@@ -34,6 +35,8 @@ function ResultIcon({ result }: { result: CheckResult }) {
 export function CollapsibleCheckRow({
   check: c,
   scoreToggle,
+  auditId,
+  pageId,
 }: {
   check: AuditCheck;
   scoreToggle?: {
@@ -42,6 +45,9 @@ export function CollapsibleCheckRow({
     disabled?: boolean;
     onIncludeChange: (include: boolean) => void;
   };
+  /** When set, evidence "View full list" link points at the page's inspector subroute. */
+  auditId?: string;
+  pageId?: string;
 }) {
   const [open, setOpen] = useState(c.result !== "pass");
   const excluded = c.excludeFromScore === true;
@@ -77,6 +83,13 @@ export function CollapsibleCheckRow({
         </summary>
         <div className="ml-6 whitespace-pre-line border-l border-border/70 pb-1 pl-3 pt-1.5 text-sm leading-snug text-muted-foreground">
           {c.explanation}
+          {c.evidence && c.evidence.items.length > 0 ? (
+            <CheckEvidence
+              evidence={c.evidence}
+              auditId={auditId}
+              pageId={pageId}
+            />
+          ) : null}
         </div>
       </details>
       {scoreToggle ? (

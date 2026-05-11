@@ -8,10 +8,10 @@ Create four products (names are for your reference; prices carry the real amount
 
 | Product              | Public marketing name |
 |----------------------|------------------------|
-| GEO Audit — Residence | **Residence**          |
-| GEO Audit — Community | **Community**          |
-| GEO Audit — Portfolio | **Portfolio**          |
-| GEO Audit — Partner   | **Partner program** (invite-only in the app) |
+| RankLume — Residence | **Residence**          |
+| RankLume — Community | **Community**          |
+| RankLume — Portfolio | **Portfolio**          |
+| RankLume — Partner   | **Partner program** (invite-only in the app) |
 
 ## 2. Recurring prices
 

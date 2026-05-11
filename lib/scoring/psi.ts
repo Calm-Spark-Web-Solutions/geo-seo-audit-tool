@@ -1,4 +1,9 @@
-import type { AuditCheck, CheckResult } from "@/types";
+import type {
+  AuditCheck,
+  AuditCheckEvidence,
+  AuditCheckEvidenceItem,
+  CheckResult,
+} from "@/types";
 
 import { resultFromScore } from "./deterministic";
 import { withRetry } from "./_retry";
@@ -43,7 +48,11 @@ function auditRow(
   result: CheckResult,
   explanation: string,
   score: number,
-  meta?: { category?: string; pillar?: "SEO" | "GEO" },
+  meta?: {
+    category?: string;
+    pillar?: "SEO" | "GEO";
+    evidence?: AuditCheckEvidence;
+  },
 ): AuditCheck {
   return {
     key,
@@ -53,7 +62,17 @@ function auditRow(
     score,
     ...(meta?.category ? { category: meta.category } : {}),
     ...(meta?.pillar ? { pillar: meta.pillar } : {}),
+    ...(meta?.evidence && meta.evidence.items.length > 0
+      ? { evidence: meta.evidence }
+      : {}),
   };
+}
+
+function psiResultFromAudit(a: PsiAudit): CheckResult {
+  if (a.score === null || a.score === undefined) return "warn";
+  if (a.score >= 0.9) return "pass";
+  if (a.score >= 0.5) return "warn";
+  return "fail";
 }
 
 /**
@@ -74,22 +93,48 @@ function psiCheckFromCategory(
   const result: CheckResult = resultFromScore(score);
 
   let detail = "";
+  const failingPsiAudits: PsiAudit[] = [];
   if (audits && category.auditRefs?.length) {
-    const failing = category.auditRefs
-      .map((ref) => audits[ref.id])
-      .filter((a): a is PsiAudit => Boolean(a))
-      .filter(
-        (a) =>
-          a.scoreDisplayMode !== "notApplicable" &&
-          a.scoreDisplayMode !== "informative" &&
-          (a.score === null || a.score < 0.9),
-      )
-      .slice(0, 2)
-      .map((a) => a.title);
-    if (failing.length > 0) {
-      detail = ` Top opportunities: ${failing.join("; ")}.`;
+    for (const ref of category.auditRefs) {
+      const a = audits[ref.id];
+      if (!a) continue;
+      if (
+        a.scoreDisplayMode === "notApplicable" ||
+        a.scoreDisplayMode === "informative" ||
+        a.scoreDisplayMode === "manual"
+      ) {
+        continue;
+      }
+      if (a.score !== null && a.score >= 0.9) continue;
+      failingPsiAudits.push(a);
+    }
+    if (failingPsiAudits.length > 0) {
+      detail = ` Top opportunities: ${failingPsiAudits
+        .slice(0, 2)
+        .map((a) => a.title)
+        .join("; ")}.`;
     }
   }
+
+  const evidenceItems: AuditCheckEvidenceItem[] = failingPsiAudits
+    .slice(0, 50)
+    .map((a) => ({
+      type: "psi_audit",
+      id: a.id,
+      title: a.title,
+      result: psiResultFromAudit(a),
+      score: a.score,
+      ...(a.displayValue ? { displayValue: a.displayValue } : {}),
+      ...(a.description ? { description: a.description } : {}),
+    }));
+  const evidence: AuditCheckEvidence | undefined =
+    evidenceItems.length > 0
+      ? {
+          totalCount: failingPsiAudits.length,
+          items: evidenceItems,
+          inspector: "lighthouse",
+        }
+      : undefined;
 
   return auditRow(
     key,
@@ -97,7 +142,7 @@ function psiCheckFromCategory(
     result,
     `Lighthouse ${label.toLowerCase()} score ${score}/100.${detail}`,
     score,
-    meta,
+    { ...meta, evidence },
   );
 }
 

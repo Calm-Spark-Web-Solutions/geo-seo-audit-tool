@@ -10,7 +10,7 @@ export const ASSET_EXTENSIONS = [
 
 export const DEFAULT_CRAWL_TIMEOUT_MS = 10_000;
 export const DEFAULT_USER_AGENT =
-  "InyoCareAuditBot/0.1 (+https://github.com/inyocare/audit-tool)";
+  "RankLumeBot/1.0 (+https://ranklume.com)";
 
 /**
  * Normalize a URL for dedupe: lowercase host, drop fragment, drop trailing slash

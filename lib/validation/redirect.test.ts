@@ -6,7 +6,7 @@ describe("safeNextPath", () => {
   it("accepts in-app paths", () => {
     expect(safeNextPath("/dashboard")).toBe("/dashboard");
     expect(safeNextPath("/invite/abc-123")).toBe("/invite/abc-123");
-    expect(safeNextPath("/audits/123?tab=geo")).toBe("/audits/123?tab=geo");
+    expect(safeNextPath("/visibility-scans/123?tab=geo")).toBe("/visibility-scans/123?tab=geo");
   });
 
   it("trims whitespace", () => {

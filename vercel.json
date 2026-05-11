@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/audits/cron-tick",
+      "path": "/api/visibility-scans/cron-tick",
       "schedule": "*/2 * * * *"
     }
   ]

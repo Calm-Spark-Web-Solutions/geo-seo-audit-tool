@@ -1,7 +1,7 @@
 -- Phase 10: durable audit queue + per-org rate limit.
 --
 -- The audit runner used to be HTTP fire-and-forget — if Vercel killed the
--- function or the network blipped between startAudit and /api/audits/[id]/run,
+-- function or the network blipped between startAudit and /api/visibility-scans/[id]/run,
 -- the audit silently sat in `running` forever. This migration adds:
 --
 --   1. `audit_jobs` — the durable queue. One non-terminal row per audit

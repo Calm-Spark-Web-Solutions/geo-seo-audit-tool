@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "InyoCare SEO & GEO Audit Tool",
+  title: "RankLume",
   description:
     "AI-powered SEO and GEO audits for senior living community websites.",
 };

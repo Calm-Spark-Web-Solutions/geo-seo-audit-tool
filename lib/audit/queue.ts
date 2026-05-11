@@ -223,7 +223,7 @@ async function runJob(
 
 /**
  * Lease + run the most recent non-terminal job for the given audit. Used by
- * the manual kick path (POST /api/audits/[id]/run).
+ * the manual kick path (POST /api/visibility-scans/[id]/run).
  *
  * Returns:
  *   - "claimed"  — we won the lease and ran (success or failure recorded)
