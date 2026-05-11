@@ -285,7 +285,7 @@ export function AuditDetailLive({
               Real-user data from Google for your site&apos;s <strong className="font-medium text-foreground">origin</strong>{" "}
               (hostname)—not per URL. Numbers below are typical experiences (often p75).{" "}
               <strong className="font-medium text-foreground">Green is good; red needs attention.</strong>{" "}
-              Uses CRUX_API_KEY or PSI/API keys with Chrome UX Reporting enabled.
+              Powered by Google&apos;s real-user measurement data.
             </CardDescription>
           </CardHeader>
           <div className="flex flex-col gap-4 px-4 pb-4 sm:px-6">

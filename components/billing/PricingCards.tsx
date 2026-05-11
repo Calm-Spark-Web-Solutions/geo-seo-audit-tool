@@ -96,11 +96,9 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
                 </div>
               </CardContent>
               <CardFooter className="text-xs text-muted-foreground">
-                {!stripeConfigured
-                  ? "Set Stripe keys to enable checkout."
-                  : !monthlyReady && !yearlyReady
-                    ? `Add Price IDs for ${tier.name} in your environment.`
-                    : null}
+                {!stripeConfigured || (!monthlyReady && !yearlyReady)
+                  ? "Checkout is temporarily unavailable. Please contact support."
+                  : null}
               </CardFooter>
             </Card>
           );
@@ -127,23 +125,7 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
             </form>
           ) : (
             <span className="max-w-md text-xs text-muted-foreground">
-              {showPartnerCheckout && !partnerPriceReady ? (
-                <>
-                  Set{" "}
-                  <code className="rounded bg-muted px-1 py-0.5">
-                    STRIPE_PRICE_PARTNER_MONTHLY
-                  </code>{" "}
-                  to enable checkout.
-                </>
-              ) : (
-                <>
-                  Checkout is invite-only. Turn on{" "}
-                  <code className="rounded bg-muted px-1 py-0.5">
-                    NEXT_PUBLIC_SHOW_PARTNER_CHECKOUT=1
-                  </code>{" "}
-                  when you want the Partner button visible to signed-in users.
-                </>
-              )}
+              Contact us for Partner pricing.
             </span>
           )}
         </CardContent>

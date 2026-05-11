@@ -43,7 +43,7 @@ export default async function LighthouseInspectorPage({
           icon={Gauge}
           title="Lighthouse data not collected"
           description={
-            "Set PSI_API_KEY and re-run the visibility scan to populate Lighthouse details for this page."
+            "Lighthouse data was not collected for this run. Re-run the visibility scan to populate this section."
           }
         />
       )}

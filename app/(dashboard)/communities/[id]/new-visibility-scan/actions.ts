@@ -269,7 +269,7 @@ export async function startAudit(
     return {
       ok: false,
       error:
-        "Scan runner is not configured (missing NEXT_PUBLIC_SITE_URL or AUDIT_RUNNER_SECRET).",
+        "Scan runner is not configured. Please contact support.",
     };
   }
 

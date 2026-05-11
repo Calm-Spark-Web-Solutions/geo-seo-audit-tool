@@ -16,13 +16,13 @@ const MESSAGES: Record<
   },
   unconfigured: {
     tone: "warn",
-    title: "Billing not configured",
-    body: "Add STRIPE_SECRET_KEY and Price IDs to your environment to enable checkout.",
+    title: "Billing unavailable",
+    body: "Checkout is temporarily unavailable. Please contact support.",
   },
   missing_price: {
     tone: "warn",
-    title: "Missing Stripe price",
-    body: "That tier’s Price ID is not set in the environment. Check .env and docs/stripe-dashboard-setup.md.",
+    title: "Plan unavailable",
+    body: "This plan is not currently available. Please contact support or choose a different plan.",
   },
   no_customer: {
     tone: "warn",

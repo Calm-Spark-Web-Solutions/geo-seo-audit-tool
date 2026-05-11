@@ -21,10 +21,17 @@ async function emit(
   const c = getClient();
   if (!c) return;
   try {
-    const ctx = { service: "ranklume", ...context };
+    const ctx = {
+      service: "ranklume",
+      env: process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
+      ...context,
+    };
     if (level === "info") await c.info(message, ctx);
     else if (level === "warn") await c.warn(message, ctx);
     else await c.error(message, ctx);
+    // Flush immediately — Logtail batches by default but Vercel serverless
+    // functions can terminate before the batch timer fires, dropping logs.
+    await c.flush();
   } catch {
     /* never throw from logging */
   }

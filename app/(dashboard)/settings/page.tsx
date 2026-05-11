@@ -132,11 +132,7 @@ export default async function SettingsPage({
                   </p>
                   {!stripeConfigured ? (
                     <p className="pt-2 text-muted-foreground">
-                      Add{" "}
-                      <code className="rounded bg-muted px-1 py-0.5">
-                        STRIPE_SECRET_KEY
-                      </code>{" "}
-                      and Price IDs to enable Stripe Checkout and webhooks.
+                      Billing is temporarily unavailable. Please contact support.
                     </p>
                   ) : null}
                 </CardContent>
