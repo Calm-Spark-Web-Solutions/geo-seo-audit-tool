@@ -21,7 +21,7 @@
     "@react-pdf/renderer": "^4.3.0",
     "@sentry/nextjs": "^10.52.0",
     "@sentry/profiling-node": "^10.52.0",
-    "@supabase/ssr": "^0.6.1",
+    "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.3",
     "axios": "^1.9.0",
     "cheerio": "^1.0.0",
