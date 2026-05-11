@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 // query doesn't hold a function slot for minutes during a flapping audit.
 export const maxDuration = 15;
 // Literal required by Next.js's route-segment-config analyzer.
-// See lib/runtime/region.ts for the canonical region reference.
+// See lib/config/region.ts for region options.
 export const preferredRegion = "iad1";
 
 const AUDIT_PAGES_SELECT_FULL =

@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 // Literal required by Next.js's route-segment-config analyzer.
-// See lib/runtime/region.ts for the canonical region reference.
+// See lib/config/region.ts for region options.
 export const preferredRegion = "iad1";
 
 export async function GET(

@@ -1,6 +1,6 @@
 /**
  * Expert human checklist rows (stored per community in `manual_check_results`).
- * Automated crawl/score output lives in deterministic / PSI / CrUX / near-dup / optional axe layers.
+ * Automated crawl/score output lives in deterministic / PSI / CrUX layers.
  * Rows here are intentionally coarse: one pass/fail bucket per real review session, not duplicates of HTML heuristics or AI GEO subscores.
  */
 

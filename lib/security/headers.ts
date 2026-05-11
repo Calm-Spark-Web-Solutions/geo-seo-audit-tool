@@ -4,10 +4,6 @@ import type { NextResponse } from "next/server";
  * Security response headers applied at the proxy / middleware layer to every
  * response (HTML and API). Centralizing here keeps the policy reviewable in
  * one file instead of scattered across each route.
- *
- * CSP starts in **report-only** mode (`Content-Security-Policy-Report-Only`)
- * so a missed allowlist entry can't black-screen production. After a week of
- * clean reports at `/api/csp-report` we'll flip to enforcing.
  */
 
 const HSTS = "max-age=63072000; includeSubDomains; preload";
@@ -84,9 +80,7 @@ export function applySecurityHeaders<T extends NextResponse>(response: T): T {
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("Permissions-Policy", PERMISSIONS_POLICY);
-  // Keep CSP in report-only mode until violation telemetry is clean. To
-  // promote, change the header name to `Content-Security-Policy`.
-  response.headers.set("Content-Security-Policy-Report-Only", CSP_DIRECTIVES);
+  response.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
   // Belt-and-suspenders: explicitly disable cross-origin embedding even if
   // a downstream route forgot to set CORP.
   response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
