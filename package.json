@@ -15,10 +15,12 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@logtail/node": "^0.5.8",
     "@radix-ui/react-label": "^2.1.2",
     "@radix-ui/react-slot": "^1.1.2",
     "@react-pdf/renderer": "^4.3.0",
     "@sentry/nextjs": "^10.52.0",
+    "@sentry/profiling-node": "^10.52.0",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.105.3",
     "axe-core": "^4.11.4",

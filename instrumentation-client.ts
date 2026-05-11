@@ -4,11 +4,35 @@
 
 import * as Sentry from "@sentry/nextjs";
 
-Sentry.init({
-  dsn: "https://3de8b8b7afc70ecc765c012cecb0c397@o4511373388742656.ingest.us.sentry.io/4511373399687168",
+import { getSentryDsn } from "@/lib/observability/sentry-dsn";
+import {
+  getSentryProfileSessionSampleRate,
+  getSentryTracesSampleRate,
+} from "@/lib/observability/sentry-sampling";
 
-  // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
-  tracesSampleRate: 1,
+const dsn = getSentryDsn();
+
+Sentry.init({
+  dsn,
+  enabled: Boolean(dsn),
+
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.browserProfilingIntegration(),
+    Sentry.consoleLoggingIntegration({ levels: ["log", "warn", "error"] }),
+  ],
+
+  tracesSampleRate: getSentryTracesSampleRate(),
+
+  tracePropagationTargets: ["localhost", /^\/api/, /^\/monitoring/],
+
+  profileSessionSampleRate: getSentryProfileSessionSampleRate(),
+
+  // Custom metrics (same import as above). Call from event handlers / effects—not at module load.
+  // Sentry.metrics.count("user_action", 1);
+  // Sentry.metrics.distribution("api_response_time", 150);
+  enableMetrics: true,
+
   // Enable logs to be sent to Sentry
   enableLogs: true,
 

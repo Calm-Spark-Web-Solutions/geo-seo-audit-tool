@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { markAuditFailed, runAudit } from "@/lib/audit/run";
+import { observabilityLog } from "@/lib/observability/log";
 
 /** Lease window. Must exceed the runner route's `maxDuration` (300 s). */
 const LEASE_MS = 8 * 60 * 1000;
@@ -132,6 +133,15 @@ async function finalizeErrored(
   const newAttempts = job.attempts + 1;
   const exhausted = newAttempts >= job.max_attempts;
   const nowIso = new Date().toISOString();
+
+  observabilityLog.error("audit.job.error", {
+    auditId,
+    jobId: job.id,
+    attempt: newAttempts,
+    maxAttempts: job.max_attempts,
+    exhausted,
+    error: truncated,
+  });
 
   if (exhausted) {
     await supabase

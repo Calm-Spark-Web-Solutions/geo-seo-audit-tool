@@ -236,6 +236,18 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
 
 ---
 
+## Observability (Sentry + Better Stack)
+
+| Concern | Setup |
+|--------|--------|
+| **Errors** | Set `NEXT_PUBLIC_SENTRY_DSN` to your Sentry project DSN (or Better Stack Errors’ Sentry-compatible DSN — same env; pick **one** backend to avoid duplicate noise). Without it, Sentry stays disabled. Optional: `SENTRY_AUTH_TOKEN` in CI for source maps. |
+| **Logs** | Set `LOGTAIL_SOURCE_TOKEN` from Better Stack → Logs → Sources. Server-side structured events (`audit.run.*`, `psi.*`, `anthropic.*`, `audit.job.error`, etc.) go to Better Stack via [`lib/observability/log.ts`](geo-seo-audit-tool/lib/observability/log.ts). No token = no log shipping (normal for local dev). |
+| **Uptime** | In Better Stack Uptime, add an HTTP monitor for production: `GET https://<your-domain>/api/health` (returns `{ ok: true }`, no DB) or `/`. |
+
+Smoke-test error capture: `/sentry-example-page` and `/api/sentry-example-api`.
+
+---
+
 ## Core Features
 
 ### 1. Authentication
@@ -399,7 +411,7 @@ The runner used to be HTTP fire-and-forget — if Vercel killed the function or 
 
 - **Durable queue.** `audit_jobs` (migration `009_audit_ops.sql`) holds one row per visibility scan run with `status`, `attempts`, `max_attempts`, `lease_until`, `last_error`. A unique partial index on `(audit_id) where status in ('queued','running')` gives idempotency: double-clicking *Start visibility scan* never produces two jobs.
 - **Lease window.** A runner claims a job by atomically flipping `status = 'running'` and writing `lease_until = now() + 8 minutes`, comfortably longer than the route's 300 s `maxDuration`. Once the lease expires the job is reapable.
-- **Vercel Cron tick.** `vercel.json` schedules `/api/visibility-scans/cron-tick` once a minute. The route authorizes by `Authorization: Bearer $CRON_SECRET` (auto-injected by Vercel) or the existing `x-audit-runner-token` for manual ops. Each tick claims up to 3 queued / abandoned-lease jobs and runs them; this is what recovers a Vercel-killed runner.
+- **Vercel Cron tick.** `vercel.json` schedules `/api/visibility-scans/cron-tick` every **2 minutes**. The route authorizes by `Authorization: Bearer $CRON_SECRET` (Vercel sends the secret you configure in the project) or the existing `x-audit-runner-token` for manual ops. Each tick claims up to 3 queued / abandoned-lease jobs and runs them; this is what recovers a Vercel-killed runner.
 - **Retry policy.** Default `max_attempts = 3`. After a thrown error, the queue helper requeues (`status = 'queued'`, `lease_until = null`) and resets `audits.status = 'pending'` so the UI doesn't flash "failed" between attempts. Once attempts are exhausted, the helper marks the job `failed` and calls `markAuditFailed`.
 - **Cancel semantics.** A *Cancel* button appears on `AuditScoreCard` whenever the scan is `pending` or `running`. The action sets `audits.status = 'cancelled'`; the running runner observes this between scoring batches (typically within ~25 s) and exits cleanly without clobbering `pages_crawled` / `progress_total` / scores. The queue helper then marks the job `cancelled`. No retry on cancel — it is terminal by user intent.
 - **Per-org rate limit.** `consume_rate_limit(...)` (security-definer, atomic `select for update`) caps visibility scan starts at **100 per company per hour**. Exhaustion returns a friendly error toast; the `audits` row is never inserted.
@@ -491,12 +503,36 @@ remove this row.
 
 ## Deployment
 
-1. Push to GitHub
-2. Connect repo to Vercel
-3. Add all environment variables in Vercel dashboard
-4. Vercel auto-deploys on every push to `main`
-5. Set Stripe webhook endpoint to `https://yourdomain.com/api/stripe/webhook` (same events as [docs/stripe-dashboard-setup.md](docs/stripe-dashboard-setup.md)); paste live signing secret into `STRIPE_WEBHOOK_SECRET`.
-6. Copy **live** Price IDs into production env vars (`STRIPE_PRICE_*`).
+### GitHub and Vercel
+
+1. Push the repo to GitHub and import it in Vercel; set the **Production Branch** (e.g. `main`).
+2. In **Vercel → Settings → Environment Variables**, add every variable from [`.env.example`](.env.example). Use **Production** vs **Preview** deliberately: previews should not receive production `SUPABASE_SERVICE_ROLE_KEY` unless you accept that risk.
+3. **`NEXT_PUBLIC_SITE_URL`** must be your **canonical HTTPS URL** (e.g. `https://www.example.com`). Do not rely on `VERCEL_URL` alone in production—it points at the `*.vercel.app` host, not your custom domain, and breaks stable auth/billing/runner behavior ([`lib/audit/runner-kick.ts`](lib/audit/runner-kick.ts)).
+4. Set **`CRON_SECRET`** in Production to the same value Vercel uses for cron `Authorization: Bearer` (see [Vercel Cron](https://vercel.com/docs/cron-jobs)).
+5. Leave **`ALLOW_AUDITS_WITHOUT_SUBSCRIPTION`** unset or `0` in Production.
+6. Optional: add **`SENTRY_AUTH_TOKEN`** for builds so source maps upload (same `org` / `project` as [`next.config.ts`](next.config.ts)).
+
+### Cloudflare DNS (in front of Vercel)
+
+1. Add your domain under **Vercel → Settings → Domains** and create the DNS records Cloudflare shows (often `CNAME` `www` → `cname.vercel-dns.com`; apex follows Vercel’s current guidance).
+2. SSL/TLS mode **Full (strict)** so traffic between Cloudflare and Vercel stays validated end-to-end.
+3. Avoid caching **HTML** at Cloudflare for this app unless you use an explicit rule set—stale HTML is a common cause of “works on `*.vercel.app` but broken on the custom domain.”
+4. If you see odd client-only behavior behind the proxy, try disabling **Rocket Loader** (and retest **Email Address Obfuscation**) for this zone or route.
+
+### Supabase (production project)
+
+1. **Authentication → URL configuration:** **Site URL** = same origin as `NEXT_PUBLIC_SITE_URL`.
+2. **Redirect URLs:** include production sign-in / password-reset callbacks and any preview URLs you actually use.
+
+### Stripe
+
+1. Register the **live** webhook: `https://<your-domain>/api/stripe/webhook` (events per [docs/stripe-dashboard-setup.md](docs/stripe-dashboard-setup.md)); put the **live** signing secret in **`STRIPE_WEBHOOK_SECRET`**.
+2. Copy **live** `STRIPE_PRICE_*` IDs into Production env vars.
+
+### After deploy
+
+- Smoke-test **`GET /api/health`** via the **custom domain** (Better Stack Uptime can monitor this—see observability notes above).
+- Run a **visibility scan** end-to-end; confirm auth and Stripe checkout on the production hostname.
 
 ---
 

@@ -4,6 +4,7 @@ import type {
   AuditCheckEvidenceItem,
   CheckResult,
 } from "@/types";
+import { observabilityLog } from "@/lib/observability/log";
 
 import { resultFromScore } from "./deterministic";
 import { withRetry } from "./_retry";
@@ -264,6 +265,11 @@ async function fetchPsiStrategy(
               status: res.status,
             });
           }
+          observabilityLog.warn("psi.http_error", {
+            url,
+            strategy,
+            status: res.status,
+          });
           return null;
         }
         return (await res.json()) as PsiResponse;
@@ -276,7 +282,15 @@ async function fetchPsiStrategy(
       backoffMs: 1000,
       retryOn: [429, 502, 503, 504, "AbortError", "ETIMEDOUT", "ECONNRESET"],
     },
-  ).catch(() => null);
+  ).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    observabilityLog.warn("psi.request_failed", {
+      url,
+      strategy,
+      error: msg.slice(0, 500),
+    });
+    return null;
+  });
 }
 
 /**
@@ -291,7 +305,15 @@ export async function runPsi(url: string): Promise<PsiBuckets> {
   const json = await fetchPsiStrategy(url, apiKey, "mobile");
   const cats = json?.lighthouseResult?.categories;
   const audits = json?.lighthouseResult?.audits;
-  if (!cats) return { seo: [], geo: [] };
+  if (!cats) {
+    if (json) {
+      observabilityLog.warn("psi.no_lighthouse_categories", {
+        url,
+        hint: "response_missing_categories",
+      });
+    }
+    return { seo: [], geo: [] };
+  }
 
   const seo: AuditCheck[] = [];
   const geo: AuditCheck[] = [];

@@ -1,3 +1,5 @@
+import { observabilityLog } from "@/lib/observability/log";
+
 /**
  * Resolve the public origin used to POST `/api/visibility-scans/[id]/run` from server
  * actions. Must match the deployed host so the audit runner is reachable
@@ -15,7 +17,14 @@ export function resolveSiteUrl(): string | null {
 export function kickAuditRunnerFireAndForget(auditId: string): void {
   const siteUrl = resolveSiteUrl();
   const runnerSecret = process.env.AUDIT_RUNNER_SECRET?.trim();
-  if (!siteUrl || !runnerSecret) return;
+  if (!siteUrl || !runnerSecret) {
+    observabilityLog.warn("runner.kick.skipped", {
+      auditId,
+      missingSiteUrl: !siteUrl,
+      missingRunnerSecret: !runnerSecret,
+    });
+    return;
+  }
   void fetch(`${siteUrl}/api/visibility-scans/${auditId}/run`, {
     method: "POST",
     headers: {
