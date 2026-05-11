@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 import { textExcerptFromHtml } from "@/lib/anthropic/excerpt";
+import { observabilityLog } from "@/lib/observability/log";
 import {
   AUDIT_RUBRIC_BLOCK,
   AUDIT_VOICE_INSTRUCTION,
@@ -265,6 +266,12 @@ export async function generatePageAnalysis(
       geo,
     };
   } catch (e) {
+    observabilityLog.warn("anthropic.page_analysis_failed", {
+      url: input.url,
+      model,
+      error:
+        e instanceof Error ? e.message.slice(0, 500) : String(e).slice(0, 500),
+    });
     if (process.env.ANTHROPIC_DEBUG_USAGE === "1") {
       console.warn(
         "[anthropic] page-analysis failed:",

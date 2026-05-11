@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { observabilityLog } from "@/lib/observability/log";
 import type { AuditCheck } from "@/types";
 import { crawlSite } from "@/lib/crawler/crawl";
 import { fetchPageHtml } from "@/lib/crawler/fetch";
@@ -176,8 +177,13 @@ export async function runAudit({
   auditId: string;
   websiteUrl: string;
 }): Promise<void> {
+  const t0 = Date.now();
   const base = normalizeUrl(websiteUrl);
   if (!base) {
+    observabilityLog.error("audit.run.invalid_origin", {
+      auditId,
+      websiteUrl,
+    });
     await supabase
       .from("audits")
       .update({
@@ -191,6 +197,13 @@ export async function runAudit({
       .eq("id", auditId);
     throw new Error("Invalid website URL");
   }
+
+  observabilityLog.info("audit.run.start", {
+    auditId,
+    origin: base,
+    psiEnabled: Boolean(process.env.PSI_API_KEY?.trim()),
+    anthropicEnabled: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+  });
 
   // Read the user's selection (may be null for legacy audit rows). Then
   // mark the audit `running` so the live UI flips out of `pending`.
@@ -241,6 +254,12 @@ export async function runAudit({
 
   const urls = await resolveUrls(base, maxPages, shardUrls, targetUrls);
 
+  observabilityLog.info("audit.urls_resolved", {
+    auditId,
+    urlCount: urls.length,
+    durationMs: Date.now() - t0,
+  });
+
   let categoryByUrl = new Map<string, string>();
   if (shardUrls && shardUrls.length > 0) {
     categoryByUrl = await buildUrlToSitemapCategoryLabelMap(
@@ -260,6 +279,10 @@ export async function runAudit({
     .eq("id", auditId);
 
   if (urls.length === 0) {
+    observabilityLog.warn("audit.run.no_urls", {
+      auditId,
+      durationMs: Date.now() - t0,
+    });
     await supabase
       .from("audits")
       .update({
@@ -391,6 +414,12 @@ export async function runAudit({
   if (finalUpdate.error) {
     throw new Error(finalUpdate.error.message);
   }
+
+  observabilityLog.info("audit.run.complete", {
+    auditId,
+    pagesCrawled,
+    durationMs: Date.now() - t0,
+  });
 }
 
 /**

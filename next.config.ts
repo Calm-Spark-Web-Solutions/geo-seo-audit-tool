@@ -8,6 +8,17 @@ const nextConfig: NextConfig = {
   // "ba.Component is not a constructor" errors. Marking it external pins it
   // to runtime require(), which is what the library expects.
   serverExternalPackages: ["@react-pdf/renderer"],
+
+  // Required for Sentry browser profiling (JS Self Profiling API).
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Document-Policy", value: "js-profiling" }],
+      },
+    ];
+  },
+
   async redirects() {
     return [
       {
