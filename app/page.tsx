@@ -26,13 +26,6 @@ export default function HomePage() {
           <Link href="/signup">Create account</Link>
         </Button>
       </div>
-
-      <Link
-        href="/dashboard"
-        className="text-xs text-muted-foreground hover:text-foreground hover:underline"
-      >
-        Continue to dashboard
-      </Link>
     </div>
   );
 }

@@ -1,6 +1,8 @@
 import { ArrowRight, CircleAlert, CircleCheck, CircleX, Gauge } from "lucide-react";
 import Link from "next/link";
 
+import { RefreshAuditPageButtons } from "@/components/audits/RefreshAuditPageButtons";
+
 import { cn } from "@/lib/utils";
 import type { AuditCheck, AuditCheckEvidenceItem, CheckResult } from "@/types";
 import {
@@ -50,12 +52,15 @@ export function LighthouseSection({
   checks,
   variant = "full",
   detailsHref,
+  pageRefresh,
 }: {
   checks: AuditCheck[];
   /** "summary" renders just the four tiles + a "View details" link. */
   variant?: "summary" | "full";
   /** Required when variant === "summary"; overview page passes the inspector route. */
   detailsHref?: string;
+  /** When set, show PageSpeed / full re-analyze controls for this audit page row. */
+  pageRefresh?: { auditId: string; pageId: string };
 }) {
   const byKey = new Map(checks.map((c) => [c.key, c] as const));
   const tiles = PSI_CATEGORY_KEYS.map((key) => byKey.get(key)).filter(
@@ -75,10 +80,20 @@ export function LighthouseSection({
             PageSpeed Insights.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Lighthouse data was not collected for this run. Re-run the visibility scan to populate this section.
+            {pageRefresh
+              ? "Lighthouse data was not collected for this run. You can run PageSpeed again for this URL, start a new visibility scan for the whole site, or re-analyze this page (includes AI)."
+              : "Lighthouse data was not collected for this run. Open this page’s Lighthouse inspector to run PageSpeed again, or start a new visibility scan for the whole site."}
           </p>
+          {pageRefresh ? (
+            <RefreshAuditPageButtons
+              auditId={pageRefresh.auditId}
+              pageId={pageRefresh.pageId}
+              layout="inline"
+              showFullReanalyze={variant === "full"}
+            />
+          ) : null}
         </CardContent>
       </Card>
     );
@@ -145,15 +160,25 @@ export function LighthouseSection({
                 : "All categories look healthy."}
             </CardDescription>
           </div>
-          {detailsHref ? (
-            <Link
-              href={detailsHref}
-              className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-foreground underline-offset-4 hover:underline"
-            >
-              View details
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-            </Link>
-          ) : null}
+          <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
+            {pageRefresh ? (
+              <RefreshAuditPageButtons
+                auditId={pageRefresh.auditId}
+                pageId={pageRefresh.pageId}
+                layout="inline"
+                showFullReanalyze={false}
+              />
+            ) : null}
+            {detailsHref ? (
+              <Link
+                href={detailsHref}
+                className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                View details
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            ) : null}
+          </div>
         </CardHeader>
         <CardContent>{tilesGrid}</CardContent>
       </Card>
@@ -162,15 +187,26 @@ export function LighthouseSection({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Gauge className="h-4 w-4 text-muted-foreground" aria-hidden />
-          Lighthouse
-        </CardTitle>
-        <CardDescription>
-          PageSpeed Insights summary for this URL. Detailed audits live in the
-          SEO and GEO check tabs below.
-        </CardDescription>
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Gauge className="h-4 w-4 text-muted-foreground" aria-hidden />
+            Lighthouse
+          </CardTitle>
+          <CardDescription>
+            PageSpeed Insights summary for this URL. Detailed audits live in the
+            SEO and GEO check tabs below.
+          </CardDescription>
+        </div>
+        {pageRefresh ? (
+          <RefreshAuditPageButtons
+            auditId={pageRefresh.auditId}
+            pageId={pageRefresh.pageId}
+            layout="inline"
+            showFullReanalyze
+            className="sm:justify-end"
+          />
+        ) : null}
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         {tilesGrid}

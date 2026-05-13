@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import {
+  communityQuotaAllowsCreate,
+  getCommunityQuotaSnapshot,
+} from "@/lib/billing/community-quota";
 import { consumeRateLimit } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -119,6 +123,20 @@ export async function createCommunity(
     MUTATION_WINDOW_S,
   );
   if (!allowed) return { ok: false, error: RATE_LIMIT_COPY };
+
+  // Bucket enforcement: hard cap the number of communities the org can
+  // create on the current plan. Unlimited (dev/staging/Stripe-off) and
+  // partner overrides skip the check.
+  const quota = await getCommunityQuotaSnapshot(supabase, user.id);
+  if (!communityQuotaAllowsCreate(quota)) {
+    return {
+      ok: false,
+      error:
+        quota.kind === "limited"
+          ? `Your plan includes ${quota.limit} community${quota.limit === 1 ? "" : "ies"}. Upgrade in Billing to add another.`
+          : "Community limit reached for your plan.",
+    };
+  }
 
   const { data, error } = await supabase
     .from("communities")

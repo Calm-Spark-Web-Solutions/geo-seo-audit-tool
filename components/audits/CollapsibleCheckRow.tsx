@@ -83,7 +83,9 @@ export function CollapsibleCheckRow({
         </summary>
         <div className="ml-6 whitespace-pre-line border-l border-border/70 pb-1 pl-3 pt-1.5 text-sm leading-snug text-muted-foreground">
           {c.explanation}
-          {c.evidence && c.evidence.items.length > 0 ? (
+          {c.evidence &&
+          (c.evidence.items.length > 0 ||
+            (c.evidence.guidanceLines?.some((l) => l.trim()) ?? false)) ? (
             <CheckEvidence
               evidence={c.evidence}
               auditId={auditId}

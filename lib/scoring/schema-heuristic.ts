@@ -146,5 +146,88 @@ export function structuredDataOfflineHeuristics(
     );
   }
 
+  let reviewMalformed = 0;
+  let aggregateMalformed = 0;
+  let reviewWellformed = 0;
+  let aggregateWellformed = 0;
+  let graphHasLocalEntity = false;
+
+  for (const block of parsedBlocks) {
+    visitObjects(block, (o) => {
+      const ts = typesOf(o);
+      if (ts.some((t) => t === "LocalBusiness" || t === "MedicalOrganization")) {
+        graphHasLocalEntity = true;
+      }
+      for (const t of ts) {
+        if (t === "Review") {
+          let authorOk = false;
+          const a = o.author;
+          if (typeof a === "string") {
+            authorOk = a.trim().length > 0;
+          } else if (a && typeof a === "object" && !Array.isArray(a)) {
+            const nm = (a as { name?: unknown }).name;
+            authorOk = typeof nm === "string" && nm.trim().length > 0;
+          } else if (Array.isArray(a) && a.length > 0) {
+            authorOk = true;
+          }
+          const rr = o.reviewRating as Record<string, unknown> | undefined;
+          const ratingVal = rr?.ratingValue;
+          const ratingOk =
+            typeof ratingVal === "number" ||
+            (typeof ratingVal === "string" && ratingVal.trim().length > 0);
+          if (!authorOk || !ratingOk) reviewMalformed += 1;
+          else reviewWellformed += 1;
+        }
+        if (t === "AggregateRating") {
+          const rv = o.ratingValue;
+          const rc = o.reviewCount ?? o.ratingCount;
+          const rvOk =
+            typeof rv === "number" ||
+            (typeof rv === "string" && String(rv).trim().length > 0);
+          const rcOk =
+            typeof rc === "number" ||
+            (typeof rc === "string" && String(rc).trim().length > 0);
+          if (!rvOk || !rcOk) aggregateMalformed += 1;
+          else aggregateWellformed += 1;
+        }
+      }
+    });
+  }
+
+  const trustRatingPresent = reviewWellformed + aggregateWellformed > 0;
+
+  if (reviewMalformed > 0) {
+    out.push(
+      item(
+        "schema_review_shape_offline",
+        "Review schema shape (offline)",
+        "warn",
+        `${reviewMalformed} Review node(s) are missing a usable author and/or reviewRating.ratingValue — fix for rich-result eligibility.`,
+      ),
+    );
+  }
+
+  if (aggregateMalformed > 0) {
+    out.push(
+      item(
+        "schema_aggregate_shape_offline",
+        "AggregateRating schema shape (offline)",
+        "warn",
+        `${aggregateMalformed} AggregateRating node(s) lack ratingValue and/or reviewCount (or ratingCount) — both are usually required together.`,
+      ),
+    );
+  }
+
+  if (graphHasLocalEntity && !trustRatingPresent && parsedBlocks.length > 0) {
+    out.push(
+      item(
+        "schema_trust_reviews_hint",
+        "Trust signals: reviews in JSON-LD",
+        "warn",
+        "Local/Medical entity markup is present but no well-formed Review or AggregateRating nodes were detected — senior living decision-makers often expect visible ratings; add compliant review markup where authentic reviews exist.",
+      ),
+    );
+  }
+
   return out;
 }

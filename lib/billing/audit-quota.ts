@@ -1,20 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isStripeConfigured } from "@/lib/stripe/server";
+import {
+  effectiveMonthlyScans,
+  resolvePlanLimits,
+} from "@/lib/billing/plan-limits";
 import { userAllowedPaidProductFeatures } from "@/lib/billing/subscription-access";
-
-/** Monthly audit starts per subscription plan slug (Stripe checkout keys). */
-const MONTHLY_SCANS_BY_PLAN: Record<string, number> = {
-  residence_monthly: 20,
-  residence_yearly: 20,
-  community_monthly: 75,
-  community_yearly: 75,
-  portfolio_monthly: 250,
-  portfolio_yearly: 250,
-  partner_monthly: 100,
-};
-
-const DEFAULT_MONTHLY_SCANS = 50;
 
 export type AuditQuotaSnapshot =
   | {
@@ -25,31 +16,40 @@ export type AuditQuotaSnapshot =
       used: number;
       limit: number;
       remaining: number;
-      /** ISO month label e.g. May 2026 */
+      /** Month label for the UTC window used in usage queries, e.g. "May 2026 (UTC)". */
       periodLabel: string;
     };
 
-function planMonthlyLimit(plan: string | null): number {
-  if (!plan) return DEFAULT_MONTHLY_SCANS;
-  return MONTHLY_SCANS_BY_PLAN[plan] ?? DEFAULT_MONTHLY_SCANS;
-}
-
-function monthBoundsUtc(now = new Date()): { start: string; end: string } {
+/**
+ * Calendar month in UTC — same window for `periodLabel` and the audits count query.
+ */
+function utcMonthWindow(now = new Date()): {
+  start: string;
+  end: string;
+  periodLabel: string;
+} {
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const start = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(y, m + 1, 1, 0, 0, 0, 0));
-  return { start: start.toISOString(), end: end.toISOString() };
-}
+  const periodLabel = `${new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(y, m, 15, 12, 0, 0, 0)))} (UTC)`;
 
-function periodLabel(now = new Date()): string {
-  return now.toLocaleString(undefined, { month: "long", year: "numeric" });
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+    periodLabel,
+  };
 }
 
 /**
- * Returns how many audits the user's organizations started this calendar month
- * vs the cap from their subscription plan. When Stripe is off or subscription
- * bypass is on, returns `unlimited` for display (enforcement in startAudit matches).
+ * Returns how many audits the user's organizations started in the **UTC**
+ * calendar month vs the cap from their subscription plan. When Stripe is off
+ * or subscription bypass is on, returns `unlimited` for display (enforcement
+ * in startAudit matches).
  */
 export async function getAuditQuotaSnapshot(
   supabase: SupabaseClient,
@@ -59,7 +59,7 @@ export async function getAuditQuotaSnapshot(
 
   const { data: subRow } = await supabase
     .from("subscriptions")
-    .select("status, plan")
+    .select("status, plan, plan_limits")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -71,11 +71,18 @@ export async function getAuditQuotaSnapshot(
     return { kind: "unlimited" };
   }
 
-  const limit = planMonthlyLimit(subRow?.plan ?? null);
-  if (limit <= 0) {
+  const planLimits = resolvePlanLimits(
+    subRow?.plan ?? null,
+    subRow?.plan_limits ?? null,
+  );
+  // Scale the per-community audit-start budget by the customer's purchased
+  // community quantity (stored on `plan_limits.communities` by the webhook).
+  // Caller fits into "unlimited" when the per-community budget is `null`.
+  const limit = effectiveMonthlyScans(planLimits, planLimits.communities);
+  if (limit === null || limit <= 0) {
     return { kind: "unlimited" };
   }
-  const { start, end } = monthBoundsUtc();
+  const { start, end, periodLabel } = utcMonthWindow();
 
   const { data: memberships } = await supabase
     .from("company_members")
@@ -89,7 +96,7 @@ export async function getAuditQuotaSnapshot(
       used: 0,
       limit,
       remaining: limit,
-      periodLabel: periodLabel(),
+      periodLabel,
     };
   }
 
@@ -98,14 +105,14 @@ export async function getAuditQuotaSnapshot(
     .select("id")
     .in("company_id", companyIds);
 
-  const communityIds = (communities ?? []).map((c) => c.id);
+  const communityIds = (communities ?? []).map((c) => c.id as string);
   if (communityIds.length === 0) {
     return {
       kind: "limited",
       used: 0,
       limit,
       remaining: limit,
-      periodLabel: periodLabel(),
+      periodLabel,
     };
   }
 
@@ -123,7 +130,7 @@ export async function getAuditQuotaSnapshot(
       used: 0,
       limit,
       remaining: limit,
-      periodLabel: periodLabel(),
+      periodLabel,
     };
   }
 
@@ -135,7 +142,7 @@ export async function getAuditQuotaSnapshot(
     used,
     limit,
     remaining,
-    periodLabel: periodLabel(),
+    periodLabel,
   };
 }
 

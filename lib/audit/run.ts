@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { devRunnerConsole } from "@/lib/audit/dev-runner-console";
 import { observabilityLog } from "@/lib/observability/log";
 import type { AuditCheck } from "@/types";
 import { crawlSite } from "@/lib/crawler/crawl";
-import { fetchPageHtml } from "@/lib/crawler/fetch";
+import { fetchPageWithMeta, type PageFetchMeta } from "@/lib/crawler/fetch";
 import {
   DEFAULT_USER_AGENT,
   isAssetUrl,
@@ -16,6 +17,7 @@ import {
   fetchUrlsFromShards,
 } from "@/lib/crawler/sitemap";
 import { recalculateAuditRollupScores } from "@/lib/audit/rollup-scores";
+import { recordRosterEntries } from "@/lib/billing/page-quota";
 import {
   categoryScoreEffective,
   overallPageScoreFromChecks,
@@ -23,6 +25,7 @@ import {
 import { scoreAndAnalyzePage } from "@/lib/scoring";
 import { runCruxOriginChecks } from "@/lib/scoring/crux";
 import { detectLikelyPasswordGate } from "@/lib/scoring/password-gate";
+import { buildCrawlGraphChecks } from "@/lib/scoring/crawl-graph";
 import { runSiteWideChecks } from "@/lib/scoring/site-wide";
 
 /**
@@ -40,6 +43,7 @@ const ENGINE_VERSION = 4;
 interface PageWork {
   url: string;
   html: string;
+  meta: PageFetchMeta;
 }
 
 /**
@@ -78,11 +82,11 @@ async function fetchAllHtml(urls: string[]): Promise<PageWork[]> {
     const slice = urls.slice(i, i + FETCH_BATCH_SIZE);
     const batch = await Promise.all(
       slice.map(async (url) => {
-        const html = await fetchPageHtml(url, {
+        const got = await fetchPageWithMeta(url, {
           timeoutMs: FETCH_TIMEOUT_MS,
           userAgent: DEFAULT_USER_AGENT,
         });
-        return html ? { url, html } : null;
+        return got ? { url, html: got.html, meta: got.meta } : null;
       }),
     );
     for (const p of batch) {
@@ -204,14 +208,18 @@ export async function runAudit({
     psiEnabled: Boolean(process.env.PSI_API_KEY?.trim()),
     anthropicEnabled: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
   });
+  devRunnerConsole("runAudit: start", { auditId, origin: base });
 
   // Read the user's selection (may be null for legacy audit rows). Then
   // mark the audit `running` so the live UI flips out of `pending`.
   const { data: auditRow } = await supabase
     .from("audits")
-    .select("max_pages, shard_urls, target_urls, status")
+    .select("max_pages, shard_urls, target_urls, status, community_id")
     .eq("id", auditId)
     .maybeSingle();
+
+  const communityId =
+    (auditRow?.community_id as string | null | undefined) ?? null;
 
   if (auditRow?.status === "cancelled") {
     return;
@@ -229,6 +237,8 @@ export async function runAudit({
     .from("audits")
     .update({ status: "running", engine_version: ENGINE_VERSION })
     .eq("id", auditId);
+
+  devRunnerConsole("runAudit: audits.status -> running", { auditId });
 
   let siteWideChecks: AuditCheck[] = [];
   try {
@@ -252,7 +262,19 @@ export async function runAudit({
     })
     .eq("id", auditId);
 
+  const tResolve = Date.now();
+  devRunnerConsole("runAudit: resolveUrls starting", {
+    auditId,
+    maxPages,
+    hasTargetUrls: Boolean(targetUrls?.length),
+    hasShardUrls: Boolean(shardUrls?.length),
+  });
   const urls = await resolveUrls(base, maxPages, shardUrls, targetUrls);
+  devRunnerConsole("runAudit: resolveUrls done", {
+    auditId,
+    urlCount: urls.length,
+    durationMs: Date.now() - tResolve,
+  });
 
   observabilityLog.info("audit.urls_resolved", {
     auditId,
@@ -278,6 +300,11 @@ export async function runAudit({
     .update({ progress_total: urls.length })
     .eq("id", auditId);
 
+  devRunnerConsole("runAudit: progress_total set", {
+    auditId,
+    progressTotal: urls.length,
+  });
+
   if (urls.length === 0) {
     observabilityLog.warn("audit.run.no_urls", {
       auditId,
@@ -302,6 +329,13 @@ export async function runAudit({
 
   const work = await fetchAllHtml(urls);
 
+  const crawlGraphChecks = buildCrawlGraphChecks(work, base);
+  siteWideChecks = [...siteWideChecks, ...crawlGraphChecks];
+  await supabase
+    .from("audits")
+    .update({ site_wide_checks: siteWideChecks })
+    .eq("id", auditId);
+
   let pagesCrawled = 0;
 
   // Running rollup aggregates so the live UI sees averages update without
@@ -324,8 +358,8 @@ export async function runAudit({
 
     const batch = work.slice(i, i + SCORE_CONCURRENCY);
     const scored = await Promise.all(
-      batch.map(async ({ url, html }) => {
-        const result = await scoreAndAnalyzePage({ url, html });
+      batch.map(async ({ url, html, meta }) => {
+        const result = await scoreAndAnalyzePage({ url, html, fetchMeta: meta });
         return { url, html, ...result };
       }),
     );
@@ -357,6 +391,26 @@ export async function runAudit({
         );
       }
       pagesCrawled += 1;
+
+      // Page-roster billing: persist this URL the first time we successfully
+      // score it for the community. Idempotent (unique on community_id+url)
+      // so re-runs and concurrent audits never double-count.
+      if (communityId) {
+        try {
+          await recordRosterEntries(supabase, {
+            communityId,
+            auditId,
+            urls: [s.url],
+          });
+        } catch (err) {
+          observabilityLog.warn("audit.roster_persist_failed", {
+            auditId,
+            communityId,
+            url: s.url,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
       // Same accumulation rules as recalculateAuditRollupScores so the
       // running aggregate matches the canonical pass at end of run.

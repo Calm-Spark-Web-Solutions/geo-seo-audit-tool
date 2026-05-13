@@ -19,13 +19,11 @@ import { Label } from "@/components/ui/label";
 type Props = {
   email: string;
   initialFullName: string;
-  initialAvatarUrl: string;
 };
 
 export function ProfileSettingsSection({
   email,
   initialFullName,
-  initialAvatarUrl,
 }: Props) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -52,8 +50,8 @@ export function ProfileSettingsSection({
       <CardHeader>
         <CardTitle className="text-base">Profile</CardTitle>
         <CardDescription>
-          Your name and avatar appear in the app shell. Avatar accepts an image
-          URL (for example from your company directory or Gravatar).
+          Your display name appears in the app shell. If you use a social or
+          SSO sign-in, your photo may still come from that provider.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -79,17 +77,6 @@ export function ProfileSettingsSection({
               defaultValue={initialFullName}
               autoComplete="name"
               placeholder="Your name"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="avatar_url">Avatar image URL</Label>
-            <Input
-              id="avatar_url"
-              name="avatar_url"
-              type="url"
-              inputMode="url"
-              defaultValue={initialAvatarUrl}
-              placeholder="https://…"
             />
           </div>
           <Button type="submit" disabled={pending}>

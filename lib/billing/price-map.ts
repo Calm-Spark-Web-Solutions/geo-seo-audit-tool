@@ -1,9 +1,17 @@
 /**
  * Maps Stripe Price IDs (from env) to stable plan slugs stored in
  * `subscriptions.plan`. Server-only — reads `process.env` at call time.
+ *
+ * Two families of price keys live here:
+ *
+ *   - **Tier keys** (residence / community / portfolio / partner):
+ *     these set `subscriptions.plan` and drive `PLAN_LIMITS_BY_SLUG`.
+ *   - **Add-on keys** (`pages_pack_*`): optional second subscription item
+ *     that buys extra new-pages-per-month per community on top of any
+ *     tier. Each unit of quantity = `PACK_NEW_PAGES_PER_UNIT` new pages.
  */
 
-export const CHECKOUT_PRICE_KEYS = [
+export const CHECKOUT_TIER_PRICE_KEYS = [
   "residence_monthly",
   "residence_yearly",
   "community_monthly",
@@ -13,6 +21,18 @@ export const CHECKOUT_PRICE_KEYS = [
   "partner_monthly",
 ] as const;
 
+export const CHECKOUT_ADDON_PRICE_KEYS = [
+  "pages_pack_monthly",
+  "pages_pack_yearly",
+] as const;
+
+export const CHECKOUT_PRICE_KEYS = [
+  ...CHECKOUT_TIER_PRICE_KEYS,
+  ...CHECKOUT_ADDON_PRICE_KEYS,
+] as const;
+
+export type CheckoutTierPriceKey = (typeof CHECKOUT_TIER_PRICE_KEYS)[number];
+export type CheckoutAddonPriceKey = (typeof CHECKOUT_ADDON_PRICE_KEYS)[number];
 export type CheckoutPriceKey = (typeof CHECKOUT_PRICE_KEYS)[number];
 
 const ENV_KEY: Record<CheckoutPriceKey, string> = {
@@ -23,6 +43,8 @@ const ENV_KEY: Record<CheckoutPriceKey, string> = {
   portfolio_monthly: "STRIPE_PRICE_PORTFOLIO_MONTHLY",
   portfolio_yearly: "STRIPE_PRICE_PORTFOLIO_YEARLY",
   partner_monthly: "STRIPE_PRICE_PARTNER_MONTHLY",
+  pages_pack_monthly: "STRIPE_PRICE_PAGES_PACK_MONTHLY",
+  pages_pack_yearly: "STRIPE_PRICE_PAGES_PACK_YEARLY",
 };
 
 /** Resolve env var name for a checkout key (for error messages). */
@@ -36,7 +58,11 @@ export function getStripePriceId(key: CheckoutPriceKey): string | null {
   return raw && raw.length > 0 ? raw : null;
 }
 
-/** Reverse lookup for webhook sync: Price ID → plan slug. */
+/**
+ * Reverse lookup for webhook sync: Price ID → key (tier or add-on).
+ * Returns `null` when the Price ID doesn't match anything we know about,
+ * so the webhook can fall back to `unknown_price:<id>` cleanly.
+ */
 export function planSlugFromStripePriceId(priceId: string): string | null {
   for (const key of CHECKOUT_PRICE_KEYS) {
     const id = getStripePriceId(key);
@@ -47,4 +73,16 @@ export function planSlugFromStripePriceId(priceId: string): string | null {
 
 export function isCheckoutPriceKey(value: string): value is CheckoutPriceKey {
   return (CHECKOUT_PRICE_KEYS as readonly string[]).includes(value);
+}
+
+export function isCheckoutTierPriceKey(
+  value: string,
+): value is CheckoutTierPriceKey {
+  return (CHECKOUT_TIER_PRICE_KEYS as readonly string[]).includes(value);
+}
+
+export function isCheckoutAddonPriceKey(
+  value: string,
+): value is CheckoutAddonPriceKey {
+  return (CHECKOUT_ADDON_PRICE_KEYS as readonly string[]).includes(value);
 }

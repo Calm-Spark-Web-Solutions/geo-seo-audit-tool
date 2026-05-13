@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { devRunnerConsole } from "@/lib/audit/dev-runner-console";
 import { claimAndRunOne } from "@/lib/audit/queue";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -50,6 +51,10 @@ export async function POST(
   if (auditErr || !audit) {
     return NextResponse.json({ error: "Audit not found" }, { status: 404 });
   }
+
+  devRunnerConsole("POST /run accepted, scheduling claimAndRunOne", {
+    auditId: audit.id,
+  });
 
   // Intentionally do not await: respond 202 immediately so the caller's
   // fire-and-forget fetch returns quickly. The runtime keeps the function

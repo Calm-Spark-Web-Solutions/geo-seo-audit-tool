@@ -50,7 +50,9 @@ export default async function AuditReportPage({
         .order("score", { ascending: false, nullsFirst: false }),
       supabase
         .from("audit_jobs")
-        .select("last_error, attempts, max_attempts")
+        .select(
+          "id, status, lease_until, updated_at, last_error, attempts, max_attempts",
+        )
         .eq("audit_id", id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -76,6 +78,10 @@ export default async function AuditReportPage({
         lastError: auditJob.last_error,
         attempts: auditJob.attempts,
         maxAttempts: auditJob.max_attempts,
+        jobId: auditJob.id,
+        jobStatus: auditJob.status as AuditQueueDiagnostics["jobStatus"],
+        leaseUntil: auditJob.lease_until,
+        jobUpdatedAt: auditJob.updated_at,
       }
     : null;
 
@@ -138,7 +144,7 @@ export default async function AuditReportPage({
         title="Visibility scan"
         description={
           <span className="flex flex-col gap-1">
-            <span>Per-page SEO and GEO checks with AI commentary.</span>
+            <span>Per-page SEO and GEO checks and site-wide probes for this scan.</span>
             {typedCommunity?.facility_type ? (
               <span className="text-muted-foreground">
                 Facility type · {typedCommunity.facility_type}

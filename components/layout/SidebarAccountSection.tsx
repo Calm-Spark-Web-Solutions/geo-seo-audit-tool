@@ -6,6 +6,10 @@ import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { cn } from "@/lib/utils";
 
+/** Hover / screen-reader context: matches getAuditQuotaSnapshot counting rules. */
+const LIMITED_QUOTA_TITLE =
+  "Each visibility scan you start counts once for the month (any outcome: pending, running, complete, failed, or cancelled). The period is the UTC calendar month shown. Usage includes all organizations you belong to, not only the organization selected in the nav — limits are per signed-in account.";
+
 export function SidebarAccountSection({
   quota,
   email,
@@ -47,8 +51,8 @@ export function SidebarAccountSection({
         )}
         title={
           collapsed
-            ? `${effectiveQuota.remaining} of ${effectiveQuota.limit} scans left (${effectiveQuota.periodLabel})`
-            : undefined
+            ? `${effectiveQuota.remaining} of ${effectiveQuota.limit} scans left — ${effectiveQuota.periodLabel}. ${LIMITED_QUOTA_TITLE}`
+            : LIMITED_QUOTA_TITLE
         }
       >
         <Gauge
@@ -65,6 +69,9 @@ export function SidebarAccountSection({
             </p>
             <p className="text-[11px] text-muted-foreground">
               {effectiveQuota.periodLabel} · {effectiveQuota.used} used
+            </p>
+            <p className="text-[10px] leading-snug text-muted-foreground/90">
+              Every started scan counts · all organizations on your account
             </p>
           </div>
         ) : null}

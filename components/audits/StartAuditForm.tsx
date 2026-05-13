@@ -16,13 +16,9 @@ import {
   type StartAuditFormState,
 } from "@/app/(dashboard)/communities/[id]/new-visibility-scan/actions";
 import { StartAuditButton } from "@/components/audits/StartAuditButton";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 const initialState: StartAuditFormState = { ok: true };
 
-const MAX_PAGES_FLOOR = 1;
-const MAX_PAGES_CEILING = 1000;
 // Above this many pages we surface a warning that the runner can hit the
 // 300 s function timeout with all scoring layers enabled.
 const RUNTIME_WARN_THRESHOLD = 300;
@@ -45,24 +41,63 @@ export interface ShardOption {
   urls: string[];
 }
 
+export interface PageRosterPreview {
+  /** Already-tracked URLs for the community. Rescans never count toward caps. */
+  trackedUrls: string[];
+  /** Caps from the active plan; null = unlimited for that knob. */
+  newMonthlyCap: number | null;
+  rosterCap: number | null;
+  rosterUsed: number;
+  newAddedThisMonth: number;
+  /** True when billing enforcement is bypassed (no Stripe, dev, partner). */
+  unlimited: boolean;
+}
+
 interface StartAuditFormProps {
   communityId: string;
   shards: ShardOption[];
-  defaultMaxPages: number;
   /** When true, app enforces active/trialing subscription for audits. */
   stripeBillingEnabled?: boolean;
   /** User may start a paid audit run (server action re-checks). */
   paidAccess?: boolean;
+  /** Snapshot of this community's roster + plan limits for the in-form preview. */
+  pageRoster?: PageRosterPreview;
+}
+
+function normalizeForRoster(input: string): string | null {
+  try {
+    const url = new URL(input);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    url.hash = "";
+    url.hostname = url.hostname.toLowerCase();
+    if (
+      (url.protocol === "http:" && url.port === "80") ||
+      (url.protocol === "https:" && url.port === "443")
+    ) {
+      url.port = "";
+    }
+    if (url.pathname.length > 1 && url.pathname.endsWith("/")) {
+      url.pathname = url.pathname.replace(/\/+$/, "");
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export function StartAuditForm({
   communityId,
   shards,
-  defaultMaxPages,
   stripeBillingEnabled = false,
   paidAccess = true,
+  pageRoster,
 }: StartAuditFormProps) {
   const [state, formAction] = useActionState(startAudit, initialState);
+
+  const trackedSet = useMemo(() => {
+    if (!pageRoster) return new Set<string>();
+    return new Set(pageRoster.trackedUrls);
+  }, [pageRoster]);
 
   // Selection: per-shard set of selected URLs.
   // We re-derive this when shards change identity (page navigation),
@@ -71,16 +106,10 @@ export function StartAuditForm({
     () => {
       const init: Record<string, Set<string>> = {};
       for (const shard of shards) {
-        init[shard.url] = new Set(
-          shard.defaultChecked ? shard.urls : [],
-        );
+        init[shard.url] = new Set();
       }
       return init;
     },
-  );
-
-  const [maxPages, setMaxPages] = useState<number>(
-    clamp(defaultMaxPages, MAX_PAGES_FLOOR, MAX_PAGES_CEILING),
   );
 
   // Distinct selected URLs across all shards. Same URL listed in two
@@ -95,29 +124,22 @@ export function StartAuditForm({
     return merged.size;
   }, [shards, selection]);
 
-  const effectivePages =
-    shards.length === 0
-      ? maxPages
-      : Math.min(selectedTotal, maxPages);
-
   const estimatedSeconds = Math.max(
     PER_PAGE_SECONDS,
     Math.ceil(
-      (Math.max(effectivePages, 1) * PER_PAGE_SECONDS) / SCORE_CONCURRENCY,
+      (Math.max(selectedTotal, 1) * PER_PAGE_SECONDS) / SCORE_CONCURRENCY,
     ),
   );
   const runtimeLabel = formatDuration(estimatedSeconds);
 
-  const overCap = selectedTotal > maxPages;
   const noneSelected = shards.length > 0 && selectedTotal === 0;
 
   const showRuntimeWarning =
-    !overCap && !noneSelected && effectivePages > RUNTIME_WARN_THRESHOLD;
+    !noneSelected && selectedTotal > RUNTIME_WARN_THRESHOLD;
   const showCostNote =
     !showRuntimeWarning &&
-    !overCap &&
     !noneSelected &&
-    effectivePages > COST_WARN_THRESHOLD;
+    selectedTotal > COST_WARN_THRESHOLD;
 
   // List of selected URLs (deduped) for hidden inputs at submit time.
   const selectedUrls = useMemo(() => {
@@ -130,6 +152,34 @@ export function StartAuditForm({
     return Array.from(merged);
   }, [shards, selection]);
 
+  const newPagesPreview = useMemo(() => {
+    if (!pageRoster || pageRoster.unlimited) return null;
+    let newCount = 0;
+    let trackedCount = 0;
+    for (const raw of selectedUrls) {
+      const n = normalizeForRoster(raw) ?? raw;
+      if (trackedSet.has(n)) trackedCount += 1;
+      else newCount += 1;
+    }
+    const remainingMonthly =
+      pageRoster.newMonthlyCap === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, pageRoster.newMonthlyCap - pageRoster.newAddedThisMonth);
+    const remainingRoster =
+      pageRoster.rosterCap === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, pageRoster.rosterCap - pageRoster.rosterUsed);
+    const slots = Math.min(remainingMonthly, remainingRoster);
+    const overBy = Math.max(0, newCount - slots);
+    return {
+      newCount,
+      trackedCount,
+      remainingMonthly,
+      remainingRoster,
+      overBy,
+    };
+  }, [pageRoster, selectedUrls, trackedSet]);
+
   // Shards with at least one URL selected — submitted as analytics metadata.
   const activeShardUrls = useMemo(() => {
     const out: string[] = [];
@@ -140,7 +190,8 @@ export function StartAuditForm({
   }, [shards, selection]);
 
   const subscriptionBlocked = stripeBillingEnabled && !paidAccess;
-  const submitDisabled = overCap || noneSelected || subscriptionBlocked;
+  const overAllowance = (newPagesPreview?.overBy ?? 0) > 0;
+  const submitDisabled = noneSelected || subscriptionBlocked || overAllowance;
 
   return (
     <form action={formAction} className="flex flex-col gap-5">
@@ -199,64 +250,70 @@ export function StartAuditForm({
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="max_pages">Maximum pages to scan</Label>
-        <div className="flex items-center gap-3">
-          <Input
-            id="max_pages"
-            name="max_pages"
-            type="number"
-            min={MAX_PAGES_FLOOR}
-            max={MAX_PAGES_CEILING}
-            step={1}
-            value={maxPages}
-            onChange={(e) => {
-              const parsed = Number.parseInt(e.target.value, 10);
-              if (Number.isFinite(parsed)) {
-                setMaxPages(
-                  clamp(parsed, MAX_PAGES_FLOOR, MAX_PAGES_CEILING),
-                );
-              } else {
-                setMaxPages(MAX_PAGES_FLOOR);
-              }
-            }}
-            className="w-32"
-          />
-          <span className="text-xs text-muted-foreground">
-            1 – {MAX_PAGES_CEILING.toLocaleString()}
-          </span>
-        </div>
-      </div>
-
       <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">
-          Plan: {effectivePages.toLocaleString()} URL
-          {effectivePages === 1 ? "" : "s"}
+          Plan: {selectedTotal.toLocaleString()} URL
+          {selectedTotal === 1 ? "" : "s"} selected
         </span>
-        {shards.length > 0 ? (
-          <>
-            {" · "}
-            {selectedTotal.toLocaleString()} selected, capped at{" "}
-            {maxPages.toLocaleString()}
-          </>
-        ) : null}
         {" · "}
         estimated runtime ~{runtimeLabel}
       </div>
 
-      {overCap ? (
+      {newPagesPreview ? (
         <div
-          role="alert"
-          className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive-foreground"
+          className={
+            newPagesPreview.overBy > 0
+              ? "rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive-foreground"
+              : "rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
+          }
         >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span>
-            You selected {selectedTotal.toLocaleString()} URLs but the cap is
-            set to {maxPages.toLocaleString()}. Lower your selection or raise
-            the cap to start the scan.
+          <span className="flex items-start gap-2">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              <strong className="font-medium text-foreground">
+                {newPagesPreview.newCount.toLocaleString()} new
+              </strong>{" "}
+              ·{" "}
+              <strong className="font-medium text-foreground">
+                {newPagesPreview.trackedCount.toLocaleString()} rescans
+              </strong>{" "}
+              of tracked pages.{" "}
+              {pageRoster?.newMonthlyCap !== null ? (
+                <>
+                  New pages remaining this month:{" "}
+                  <strong className="font-medium text-foreground">
+                    {Number.isFinite(newPagesPreview.remainingMonthly)
+                      ? newPagesPreview.remainingMonthly
+                      : "∞"}
+                  </strong>
+                  .{" "}
+                </>
+              ) : null}
+              {pageRoster?.rosterCap !== null ? (
+                <>
+                  Roster slots remaining:{" "}
+                  <strong className="font-medium text-foreground">
+                    {Number.isFinite(newPagesPreview.remainingRoster)
+                      ? newPagesPreview.remainingRoster
+                      : "∞"}
+                  </strong>
+                  .{" "}
+                </>
+              ) : null}
+              {newPagesPreview.overBy > 0 ? (
+                <span className="block pt-1 font-medium text-destructive-foreground">
+                  Selection exceeds your allowance by{" "}
+                  {newPagesPreview.overBy.toLocaleString()} new page
+                  {newPagesPreview.overBy === 1 ? "" : "s"}. Remove some new
+                  URLs or upgrade your plan.
+                </span>
+              ) : null}
+            </span>
           </span>
         </div>
-      ) : showRuntimeWarning ? (
+      ) : null}
+
+      {showRuntimeWarning ? (
         <div
           role="alert"
           className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive-foreground"
@@ -266,7 +323,7 @@ export function StartAuditForm({
             <strong className="font-semibold">Heads up:</strong> auditing more
             than {RUNTIME_WARN_THRESHOLD} URLs with all scoring layers enabled
             often exceeds the 300 s function timeout, which causes the run to
-            be retried by the queue. Consider lowering the cap.
+            be retried by the queue. Consider selecting fewer URLs.
           </span>
         </div>
       ) : showCostNote ? (
@@ -450,11 +507,6 @@ function ShardRow({ shard, selected, onChange }: ShardRowProps) {
       </div>
     </details>
   );
-}
-
-function clamp(n: number, min: number, max: number): number {
-  if (Number.isNaN(n)) return min;
-  return Math.min(max, Math.max(min, Math.round(n)));
 }
 
 function formatDuration(seconds: number): string {

@@ -2,6 +2,52 @@ import type { CheckResult } from "@/types";
 
 export type CruxVitalId = "lcp" | "inp" | "cls" | "fcp";
 
+export type CruxFormFactorId = "phone" | "desktop";
+
+export const CRUX_FORM_FACTORS: readonly {
+  id: CruxFormFactorId;
+  label: string;
+}[] = [
+  { id: "phone", label: "Mobile (phone)" },
+  { id: "desktop", label: "Desktop" },
+] as const;
+
+export const CRUX_VITAL_BASE: readonly {
+  id: CruxVitalId;
+  abbrev: string;
+  fullName: string;
+}[] = [
+  {
+    id: "lcp",
+    abbrev: "LCP",
+    fullName: "Largest Contentful Paint",
+  },
+  {
+    id: "inp",
+    abbrev: "INP",
+    fullName: "Interaction to Next Paint",
+  },
+  {
+    id: "cls",
+    abbrev: "CLS",
+    fullName: "Cumulative Layout Shift",
+  },
+  {
+    id: "fcp",
+    abbrev: "FCP",
+    fullName: "First Contentful Paint",
+  },
+] as const;
+
+/** Stable check key for CrUX histogram rows (phone / desktop cohorts). */
+export function cruxMetricCheckKey(
+  form: CruxFormFactorId,
+  vital: CruxVitalId,
+): string {
+  return `crux_${form}_${vital}_p75`;
+}
+
+/** Legacy keys from audits before phone/desktop split (no form factor in key). */
 export const CRUX_VITAL_SLOTS: readonly {
   id: CruxVitalId;
   checkKey: string;

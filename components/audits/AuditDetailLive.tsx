@@ -108,13 +108,19 @@ export function AuditDetailLive({
   const resumedFlag = searchParams.get("resumed");
 
   useEffect(() => {
+    // Stable per-audit toast id so sonner dedupes if the effect runs more than
+    // once on mount (React Strict Mode in dev double-invokes effects; without
+    // an id we'd render two identical "Audit started" toasts).
     if (startedFlag === "1") {
       toast.success("Audit started", {
+        id: `audit-started:${initialAudit.id}`,
         description:
           "We're discovering URLs and scoring pages — this updates live.",
       });
     } else if (resumedFlag === "1") {
-      toast.info("Resuming the in-flight audit for this community.");
+      toast.info("Resuming the in-flight audit for this community.", {
+        id: `audit-resumed:${initialAudit.id}`,
+      });
     }
     // Only run on first paint per audit detail mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,9 +259,12 @@ export function AuditDetailLive({
     };
   }, [initialAudit.id]);
 
-  const siteWide = Array.isArray(audit.site_wide_checks)
-    ? (audit.site_wide_checks as AuditCheck[])
-    : [];
+  const siteWide = useMemo(() => {
+    return Array.isArray(audit.site_wide_checks)
+      ? (audit.site_wide_checks as AuditCheck[])
+      : [];
+  }, [audit.site_wide_checks]);
+
   const cruxField =
     Array.isArray(audit.crux_field_checks) ? (audit.crux_field_checks as AuditCheck[]) : [];
   return (
@@ -267,12 +276,13 @@ export function AuditDetailLive({
           <CardHeader className="pb-0">
             <CardTitle className="text-base">Site-wide probes</CardTitle>
             <CardDescription>
-              These apply to the <strong className="font-medium text-foreground">entire domain</strong> for this scan —
-              robots.txt, AI bot rules, and sitemap discovery at the origin. Empty when probes did not run or returned no rows.
+              Domain-wide signals (robots.txt, sitemap, AI bot rules) plus crawl-graph metrics for{" "}
+              <strong className="font-medium text-foreground">URLs in this scan</strong> (orphans, depth from seed,
+              anchor-text quality). Expand a row to see evidence such as orphan URLs.
             </CardDescription>
           </CardHeader>
           <div className="px-4 pb-4 sm:px-6">
-            <CheckList title="" checks={siteWide} />
+            <CheckList title="" checks={siteWide} explanationLayout="collapsible" />
           </div>
         </Card>
       ) : null}
@@ -334,8 +344,7 @@ export function AuditDetailLive({
             <CardHeader className="pb-0">
               <CardTitle className="text-base">Scanned URLs</CardTitle>
               <CardDescription>
-                Click a row for the full breakdown — checks, AI commentary, and
-                suggested fixes.
+                Click a row for the full breakdown — checks and suggested fixes.
               </CardDescription>
             </CardHeader>
             <div className="px-4 pb-2 sm:px-6">

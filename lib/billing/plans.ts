@@ -1,90 +1,113 @@
 /**
- * Marketing copy for billing tiers. Limits are **not** enforced in app code
- * yet — copy stays honest while you finalize quotas per tier.
+ * Marketing copy for billing tiers. Limits + per-community prices are
+ * sourced from `plan-limits.ts` so the plan builder UI and the enforcement
+ * code never drift.
+ *
+ * Pricing model: each tier is a **per-community subscription**. The buyer
+ * picks a tier (Basic/Plus/Pro) and a community count; Stripe carries the
+ * count as the subscription item `quantity` and bills `unit_amount × qty`.
  */
 
-import type { CheckoutPriceKey } from "./price-map";
+import {
+  formatPlanLimitsShort,
+  PLAN_LIMITS_BY_SLUG,
+  TIER_PRICING,
+} from "./plan-limits";
+import type { CheckoutTierPriceKey } from "./price-map";
 
 export type PublicTierId = "residence" | "community" | "portfolio";
 
 export interface PublicTierCard {
   id: PublicTierId;
+  /** Display name on the card title (e.g. "Plus per community"). */
   name: string;
+  /** Short marketing tagline. */
   tagline: string;
-  /** Shown in UI; replace when limits are finalized */
+  /** One-line limits summary derived from `plan-limits.ts`. */
   limitsNote: string;
   bullets: string[];
-  monthlyKey: CheckoutPriceKey;
-  yearlyKey: CheckoutPriceKey;
-  monthlyDisplay: string;
-  yearlyDisplay: string;
+  monthlyKey: CheckoutTierPriceKey;
+  yearlyKey: CheckoutTierPriceKey;
+  /** Per-community unit price in whole USD/mo. */
+  monthlyUnitUsd: number;
+  /** Per-community unit price in whole USD/yr. */
+  yearlyUnitUsd: number;
 }
 
-/** Three public tiers shown as pricing cards + Partner callout below */
+function tierBullets(planKey: CheckoutTierPriceKey, extras: string[]): string[] {
+  const limits = PLAN_LIMITS_BY_SLUG[planKey];
+  const scanLine =
+    limits.monthlyScans === null
+      ? "Unlimited audit starts per community"
+      : `${limits.monthlyScans} audit starts per community per month`;
+  return [scanLine, "Rescans of already-tracked pages are always free", ...extras];
+}
+
+/** Three public tiers shown as plan-builder picker cards + Partner callout. */
 export const PUBLIC_TIERS: PublicTierCard[] = [
   {
     id: "residence",
-    name: "Residence",
-    tagline: "Single-community operators",
-    limitsNote: "Usage limits will appear here once finalized.",
-    bullets: [
+    name: `${TIER_PRICING.residence.label} per community`,
+    tagline: TIER_PRICING.residence.tagline,
+    limitsNote: formatPlanLimitsShort(PLAN_LIMITS_BY_SLUG.residence_monthly),
+    bullets: tierBullets("residence_monthly", [
       "Full SEO + GEO audits with AI commentary",
       "PDF export and audit history",
       "CrUX, PSI, and manual expert checklist",
-    ],
+    ]),
     monthlyKey: "residence_monthly",
     yearlyKey: "residence_yearly",
-    monthlyDisplay: "$79/mo",
-    yearlyDisplay: "$790/yr",
+    monthlyUnitUsd: TIER_PRICING.residence.monthlyUsd,
+    yearlyUnitUsd: TIER_PRICING.residence.yearlyUsd,
   },
   {
     id: "community",
-    name: "Community",
-    tagline: "Growing regional operators",
-    limitsNote: "Usage limits will appear here once finalized.",
-    bullets: [
-      "Everything in Residence",
-      "More communities and scale headroom",
-      "Priority for operational workflows",
-    ],
+    name: `${TIER_PRICING.community.label} per community`,
+    tagline: TIER_PRICING.community.tagline,
+    limitsNote: formatPlanLimitsShort(PLAN_LIMITS_BY_SLUG.community_monthly),
+    bullets: tierBullets("community_monthly", [
+      `Everything in ${TIER_PRICING.residence.label}`,
+      "Bigger page roster and new-page allowance",
+      "Best for regional operators with several communities",
+    ]),
     monthlyKey: "community_monthly",
     yearlyKey: "community_yearly",
-    monthlyDisplay: "$199/mo",
-    yearlyDisplay: "$1,990/yr",
+    monthlyUnitUsd: TIER_PRICING.community.monthlyUsd,
+    yearlyUnitUsd: TIER_PRICING.community.yearlyUsd,
   },
   {
     id: "portfolio",
-    name: "Portfolio",
-    tagline: "Multi-site portfolios",
-    limitsNote: "Usage limits will appear here once finalized.",
-    bullets: [
-      "Everything in Community",
-      "Designed for agency / multi-brand rollouts",
-      "Highest tier for volume and support expectations",
-    ],
+    name: `${TIER_PRICING.portfolio.label} per community`,
+    tagline: TIER_PRICING.portfolio.tagline,
+    limitsNote: formatPlanLimitsShort(PLAN_LIMITS_BY_SLUG.portfolio_monthly),
+    bullets: tierBullets("portfolio_monthly", [
+      `Everything in ${TIER_PRICING.community.label}`,
+      "Highest tracked-page cap and monthly new-page allowance",
+      "Best for content-heavy or multi-brand sites",
+    ]),
     monthlyKey: "portfolio_monthly",
     yearlyKey: "portfolio_yearly",
-    monthlyDisplay: "$449/mo",
-    yearlyDisplay: "$4,490/yr",
+    monthlyUnitUsd: TIER_PRICING.portfolio.monthlyUsd,
+    yearlyUnitUsd: TIER_PRICING.portfolio.yearlyUsd,
   },
 ];
 
-/** Partner program — replaces “Internal discount” in customer-facing copy */
+/** Partner program — invoiced pricing for very large or custom accounts. */
 export const PARTNER_PROGRAM = {
   name: "Partner program",
   description:
-    "Available by invitation for organizations we work closely with.",
-  priceNote: "$20/mo — invitation only",
+    "For organizations with more than 100 communities or custom roster, audit-start, and allowance needs. We design the plan with you and invoice off-platform.",
+  priceNote: "Custom — invitation / contact only",
   checkoutKey: "partner_monthly",
 };
 
 const PLAN_LABELS: Record<string, string> = {
-  residence_monthly: "Residence (monthly)",
-  residence_yearly: "Residence (yearly)",
-  community_monthly: "Community (monthly)",
-  community_yearly: "Community (yearly)",
-  portfolio_monthly: "Portfolio (monthly)",
-  portfolio_yearly: "Portfolio (yearly)",
+  residence_monthly: `${TIER_PRICING.residence.label} per community (monthly)`,
+  residence_yearly: `${TIER_PRICING.residence.label} per community (yearly)`,
+  community_monthly: `${TIER_PRICING.community.label} per community (monthly)`,
+  community_yearly: `${TIER_PRICING.community.label} per community (yearly)`,
+  portfolio_monthly: `${TIER_PRICING.portfolio.label} per community (monthly)`,
+  portfolio_yearly: `${TIER_PRICING.portfolio.label} per community (yearly)`,
   partner_monthly: "Partner program",
   unknown: "Unknown plan",
 };
@@ -93,6 +116,15 @@ const PLAN_LABELS: Record<string, string> = {
 export function formatPlanLabel(planSlug: string | null | undefined): string {
   if (!planSlug) return "No active plan";
   return PLAN_LABELS[planSlug] ?? planSlug;
+}
+
+/** Format whole-dollar USD without trailing zeros. */
+export function formatUsd(amount: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
 /** Friendly status line for Stripe subscription statuses */
