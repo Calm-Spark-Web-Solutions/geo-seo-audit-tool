@@ -22,10 +22,17 @@ const ANTHROPIC_TIMEOUT_MS = 30_000;
 /** Haiku fast path; synced with Anthropic-supported IDs (see release notes). */
 const DEFAULT_MODEL = "claude-haiku-4-5";
 
+const ACTION_LINE_SCHEMA = {
+  type: "array" as const,
+  items: { type: "string" as const, maxLength: 280 },
+  minItems: 2,
+  maxItems: 4,
+};
+
 const REPORT_PAGE_TOOL = {
   name: "report_page",
   description:
-    "Return commentary plus four integer subscores (0..100) for the page.",
+    "Return commentary, four integer subscores (0..100), and concrete next-step bullets per dimension for implementers.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -40,19 +47,40 @@ const REPORT_PAGE_TOOL = {
         },
         required: ["eeat", "content_depth", "scannability", "entity_clarity"],
       },
+      actions: {
+        type: "object" as const,
+        properties: {
+          eeat: ACTION_LINE_SCHEMA,
+          content_depth: ACTION_LINE_SCHEMA,
+          scannability: ACTION_LINE_SCHEMA,
+          entity_clarity: ACTION_LINE_SCHEMA,
+        },
+        required: ["eeat", "content_depth", "scannability", "entity_clarity"],
+      },
     },
-    required: ["comment", "scores"],
+    required: ["comment", "scores", "actions"],
   },
+};
+
+interface ReportPageScores {
+  eeat: number;
+  content_depth: number;
+  scannability: number;
+  entity_clarity: number;
+}
+
+export type ReportPageActions = {
+  eeat: string[];
+  content_depth: string[];
+  scannability: string[];
+  entity_clarity: string[];
 };
 
 interface ReportPageInput {
   comment: string;
-  scores: {
-    eeat: number;
-    content_depth: number;
-    scannability: number;
-    entity_clarity: number;
-  };
+  scores: ReportPageScores;
+  /** Present on successful tool calls; parsed defensively via `parseReportPageActions`. */
+  actions?: ReportPageActions;
 }
 
 const SUBSCORE_KEYS = [
@@ -138,7 +166,44 @@ export function buildAnthropicUserPayload(args: {
   ].join("\n");
 }
 
-function isReportPageInput(value: unknown): value is ReportPageInput {
+/**
+ * Normalize per-dimension action lines from the tool payload.
+ * Exported for unit tests.
+ */
+export function parseReportPageActions(raw: unknown): ReportPageActions {
+  const empty: ReportPageActions = {
+    eeat: [],
+    content_depth: [],
+    scannability: [],
+    entity_clarity: [],
+  };
+  if (!raw || typeof raw !== "object") return empty;
+  const root = raw as Record<string, unknown>;
+  const a = root.actions;
+  if (!a || typeof a !== "object") return empty;
+  const o = a as Record<string, unknown>;
+
+  const clampField = (x: unknown): string[] => {
+    if (!Array.isArray(x)) return [];
+    const out: string[] = [];
+    for (const el of x) {
+      if (typeof el !== "string") continue;
+      const t = el.replace(/\s+/g, " ").trim();
+      if (t) out.push(t.slice(0, 500));
+      if (out.length >= 4) break;
+    }
+    return out;
+  };
+
+  return {
+    eeat: clampField(o.eeat),
+    content_depth: clampField(o.content_depth),
+    scannability: clampField(o.scannability),
+    entity_clarity: clampField(o.entity_clarity),
+  };
+}
+
+export function isReportPageInput(value: unknown): value is ReportPageInput {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
   if (typeof v.comment !== "string") return false;
@@ -209,7 +274,7 @@ export async function generatePageAnalysis(
         client.messages.create(
           {
             model,
-            max_tokens: 800,
+            max_tokens: 1200,
             tools: [REPORT_PAGE_TOOL],
             tool_choice: { type: "tool", name: REPORT_PAGE_TOOL.name },
             system: [
@@ -248,15 +313,26 @@ export async function generatePageAnalysis(
     }
 
     const { comment, scores } = toolBlock.input;
+    const actions = parseReportPageActions(toolBlock.input);
+
     const geo: AuditCheck[] = SUBSCORE_KEYS.map((s) => {
       const raw = scores[s.field];
       const score = clampScore(raw);
+      const guidanceLines = actions[s.field];
       return {
         key: s.key,
         label: s.label,
         result: resultFromScore(score),
         explanation: `${s.explanation} Model score: ${score}/100.`,
         score,
+        ...(guidanceLines.length > 0
+          ? {
+              evidence: {
+                items: [],
+                guidanceLines,
+              },
+            }
+          : {}),
       };
     });
 

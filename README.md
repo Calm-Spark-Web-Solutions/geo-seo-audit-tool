@@ -133,7 +133,6 @@ PSI calls add roughly 15–25 s per page; the runner concurrency is capped at 3 
 |---|---|---|
 | Site-wide probes | `audits.site_wide_checks` | Robots.txt, AI bot rules, sitemap discovery — no dedicated key beyond the crawler |
 | Chrome UX Report (CrUX) | `audits.crux_field_checks` | Enable Chrome UX Report API in Google Cloud; `CRUX_API_KEY` optional (falls back to `PSI_API_KEY`) |
-| axe WCAG scans | GEO checks on each page row | `AUDIT_RUN_AXE=1` or `true`. Runs in jsdom (not a full browser) — some pages time out or fail; use `AUDIT_RUN_AXE_TIMEOUT_MS` (3–120s, default 25s), `AUDIT_RUN_AXE_DEBUG=1`, or Lighthouse in the browser for definitive a11y. |
 | Per-check evidence samples | `audit_pages.seo_results[].evidence`, `geo_results[].evidence` | Inline samples (anchors, missing-alt images, schema @types, failing Lighthouse audits) that power the scan-detail inspectors. Cap per check via `AUDIT_EVIDENCE_MAX_ITEMS` (default `50`, max `500`). |
 
 ### Three kinds of scan findings

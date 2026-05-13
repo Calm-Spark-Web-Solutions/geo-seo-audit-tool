@@ -11,7 +11,6 @@ import {
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AiCommentaryCard } from "@/components/audits/AiCommentaryCard";
 import { AuditPageRollupExclusion } from "@/components/audits/AuditPageRollupExclusion";
 import { FixesList } from "@/components/audits/FixesList";
 import { HowToReadDismissible } from "@/components/audits/HowToReadDismissible";
@@ -295,6 +294,7 @@ export default async function AuditPageDetailPage({
         checks={allChecks}
         variant="summary"
         detailsHref={`${basePath}/inspectors/lighthouse`}
+        pageRefresh={{ auditId, pageId }}
       />
 
       {allChecks.length > 0 ? (
@@ -367,10 +367,6 @@ export default async function AuditPageDetailPage({
             </Link>
           ))}
         </div>
-      ) : null}
-
-      {typedPage.ai_comment ? (
-        <AiCommentaryCard comment={typedPage.ai_comment} />
       ) : null}
     </>
   );

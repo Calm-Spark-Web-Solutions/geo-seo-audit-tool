@@ -12,6 +12,12 @@ import {
   getAuditQuotaSnapshot,
   quotaAllowsNewAudit,
 } from "@/lib/billing/audit-quota";
+import { loadBillingContext } from "@/lib/billing/billing-context";
+import {
+  classifyScanUrls,
+  enforceNewPagesAllowance,
+  loadNewPagesAllowance,
+} from "@/lib/billing/page-quota";
 import { userAllowedPaidProductFeatures } from "@/lib/billing/subscription-access";
 import { sameOrigin } from "@/lib/crawler/normalize";
 import { consumeRateLimit } from "@/lib/ratelimit";
@@ -30,9 +36,7 @@ export type StartAuditFormState = {
 const RATE_MAX = 100;
 const RATE_WINDOW_SECONDS = 60 * 60;
 
-const MAX_PAGES_FLOOR = 1;
 const MAX_PAGES_CEILING = 1000;
-const DEFAULT_MAX_PAGES = 100;
 // Hard cap on shards-with-selection we accept (analytics metadata only).
 // The picker is a checkbox list so this is a sanity stop against
 // hand-crafted submissions.
@@ -82,21 +86,6 @@ function parseSelection(
   formData: FormData,
   websiteUrl: string,
 ): ParsedSelection | { error: string } {
-  const rawMax = formData.get("max_pages");
-  let maxPages = DEFAULT_MAX_PAGES;
-  if (typeof rawMax === "string" && rawMax.trim() !== "") {
-    const parsed = Number.parseInt(rawMax, 10);
-    if (!Number.isFinite(parsed)) {
-      return { error: "Maximum pages must be a number." };
-    }
-    if (parsed < MAX_PAGES_FLOOR || parsed > MAX_PAGES_CEILING) {
-      return {
-        error: `Maximum pages must be between ${MAX_PAGES_FLOOR} and ${MAX_PAGES_CEILING}.`,
-      };
-    }
-    maxPages = parsed;
-  }
-
   const targetParsed = parseSameOriginUrlList(
     formData.getAll("page_urls"),
     websiteUrl,
@@ -114,11 +103,8 @@ function parseSelection(
       error: `Too many URLs selected (max ${MAX_PAGES_CEILING}).`,
     };
   }
-  if (targetParsed.length > maxPages) {
-    return {
-      error: `You selected ${targetParsed.length} URLs but the cap is set to ${maxPages}. Lower your selection or raise the cap.`,
-    };
-  }
+
+  const maxPages = targetParsed.length;
 
   const shardParsed = parseSameOriginUrlList(
     formData.getAll("shard_urls"),
@@ -193,6 +179,34 @@ export async function startAudit(
   const parsed = parseSelection(formData, community.website_url);
   if ("error" in parsed) {
     return { ok: false, error: parsed.error };
+  }
+
+  // Page-roster billing gate. Rescans of URLs already in the roster are
+  // always free; new URLs eat the monthly new-page allowance and the
+  // total roster cap (see `community_page_roster` + `lib/billing/page-quota.ts`).
+  const billingCtx = await loadBillingContext(supabase, user.id);
+  if (!billingCtx.unlimited) {
+    const classified = await classifyScanUrls(supabase, {
+      communityId: communityId,
+      urls: parsed.targetUrls,
+    });
+    const allowance = await loadNewPagesAllowance(supabase, {
+      communityId: communityId,
+      limits: billingCtx.limits,
+    });
+    const decision = enforceNewPagesAllowance({
+      classified,
+      allowance,
+    });
+    if (!decision.ok) {
+      return { ok: false, error: decision.message };
+    }
+    if (decision.trimmedNewUrls.length > 0) {
+      return {
+        ok: false,
+        error: `Selected URL list exceeds your remaining new-page allowance for this community. You can keep ${decision.acceptedUrls.length} URL${decision.acceptedUrls.length === 1 ? "" : "s"} (${decision.acceptedNewUrls.length} new, ${classified.tracked.length} tracked rescan${classified.tracked.length === 1 ? "" : "s"}); remove ${decision.trimmedNewUrls.length} new URL${decision.trimmedNewUrls.length === 1 ? "" : "s"} or upgrade your plan.`,
+      };
+    }
   }
 
   // Idempotency: if there is already a pending or running audit for this

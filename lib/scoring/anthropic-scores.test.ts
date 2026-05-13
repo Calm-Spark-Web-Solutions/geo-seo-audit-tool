@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAnthropicUserPayload } from "./anthropic-scores";
+import {
+  buildAnthropicUserPayload,
+  isReportPageInput,
+  parseReportPageActions,
+} from "./anthropic-scores";
 
 describe("buildAnthropicUserPayload", () => {
   it("wraps the excerpt in fenced delimiters and places JSON before it", () => {
@@ -51,5 +55,76 @@ describe("buildAnthropicUserPayload", () => {
       excerpt: "x",
     });
     expect(payload).toContain('{"foo":"bar","n":42}');
+  });
+});
+
+describe("parseReportPageActions", () => {
+  it("returns empty arrays when actions are missing or malformed", () => {
+    const empty = {
+      eeat: [],
+      content_depth: [],
+      scannability: [],
+      entity_clarity: [],
+    };
+    expect(parseReportPageActions(null)).toEqual(empty);
+    expect(parseReportPageActions(undefined)).toEqual(empty);
+    expect(parseReportPageActions({})).toEqual(empty);
+    expect(parseReportPageActions({ actions: "not-an-object" })).toEqual(empty);
+    expect(parseReportPageActions({ actions: {} })).toEqual(empty);
+  });
+
+  it("keeps up to four non-empty trimmed strings per field", () => {
+    const out = parseReportPageActions({
+      actions: {
+        eeat: ["  first  ", "", "second", "third", "fourth", "fifth ignored"],
+        content_depth: [1, "only strings", null, "ok"],
+        scannability: ["a", "b", "c", "d"],
+        entity_clarity: [],
+      },
+    });
+    expect(out.eeat).toEqual(["first", "second", "third", "fourth"]);
+    expect(out.content_depth).toEqual(["only strings", "ok"]);
+    expect(out.scannability).toEqual(["a", "b", "c", "d"]);
+    expect(out.entity_clarity).toEqual([]);
+  });
+
+  it("truncates each line to 500 characters", () => {
+    const long = "x".repeat(600);
+    const out = parseReportPageActions({
+      actions: {
+        eeat: [long],
+        content_depth: [],
+        scannability: [],
+        entity_clarity: [],
+      },
+    });
+    expect(out.eeat[0]).toHaveLength(500);
+  });
+});
+
+describe("isReportPageInput", () => {
+  it("accepts comment + numeric scores (actions optional for type guard)", () => {
+    expect(
+      isReportPageInput({
+        comment: "ok",
+        scores: {
+          eeat: 10,
+          content_depth: 20,
+          scannability: 30,
+          entity_clarity: 40,
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects missing or non-numeric scores", () => {
+    expect(
+      isReportPageInput({
+        comment: "x",
+        scores: { eeat: 1, content_depth: 2, scannability: 3 },
+      }),
+    ).toBe(false);
+    expect(isReportPageInput({ comment: "x", scores: null })).toBe(false);
+    expect(isReportPageInput({ scores: {} })).toBe(false);
   });
 });

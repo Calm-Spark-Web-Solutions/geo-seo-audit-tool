@@ -219,23 +219,29 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: tokens.space.s8,
     backgroundColor: tokens.color.surface,
+    alignItems: "center",
   },
   scoreCardSpaced: {
     flex: 1,
     marginLeft: tokens.space.s8,
     padding: tokens.space.s8,
     backgroundColor: tokens.color.surface,
+    alignItems: "center",
   },
   scoreLabel: {
+    width: "100%",
     fontSize: tokens.font.xs,
     color: tokens.color.subtle,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: 2,
+    textAlign: "center",
   },
   scoreValueRow: {
     flexDirection: "row",
     alignItems: "baseline",
+    justifyContent: "center",
+    width: "100%",
   },
   scoreValue: {
     fontSize: 22,
@@ -273,17 +279,21 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: tokens.space.s8,
     backgroundColor: tokens.color.surfaceAlt,
+    alignItems: "center",
   },
   statTileSpaced: {
     flex: 1,
     marginLeft: tokens.space.s8,
     padding: tokens.space.s8,
     backgroundColor: tokens.color.surfaceAlt,
+    alignItems: "center",
   },
   statValue: {
     fontSize: tokens.font.xl,
     fontFamily: "Helvetica-Bold",
     color: tokens.color.ink,
+    width: "100%",
+    textAlign: "center",
   },
   statLabel: {
     fontSize: tokens.font.xs,
@@ -291,6 +301,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
     marginTop: 2,
+    width: "100%",
+    textAlign: "center",
   },
 
   // Bullet list (Exec summary "What we checked").
@@ -313,14 +325,34 @@ const styles = StyleSheet.create({
     color: tokens.color.inkSoft,
   },
 
-  // Pill (priority / status).
-  pill: {
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+  /** Status glyph box (! / X / OK) — View centers text better than background on Text alone. */
+  statusPillBox: {
+    width: 24,
+    height: 20,
+    borderRadius: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusPillGlyph: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: tokens.font.sm,
+    lineHeight: 1,
+  },
+  /** Priority badge (HIGH / MED / LOW) — outer View for vertical centering. */
+  priorityPillBox: {
+    minWidth: 44,
+    minHeight: 16,
+    paddingHorizontal: 6,
+    borderRadius: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  priorityPillLabel: {
     fontFamily: "Helvetica-Bold",
     fontSize: tokens.font.xs,
     textTransform: "uppercase",
     letterSpacing: 0.6,
+    lineHeight: 1,
   },
 
   // Checks rendering.
@@ -340,7 +372,11 @@ const styles = StyleSheet.create({
   },
   checkHeader: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
+  },
+  checkStatusCell: {
+    width: 24,
+    alignItems: "center",
   },
   checkLabel: {
     flex: 1,
@@ -351,23 +387,30 @@ const styles = StyleSheet.create({
   },
   checkExplanation: {
     marginTop: 2,
-    marginLeft: 24,
+    marginLeft: 30,
     fontSize: tokens.font.sm,
     color: tokens.color.muted,
   },
+  checkScoringNote: {
+    marginTop: 2,
+    marginLeft: 30,
+    fontSize: tokens.font.xs,
+    color: tokens.color.muted,
+    lineHeight: 1.35,
+  },
   checkEvidence: {
     marginTop: 2,
-    marginLeft: 24,
+    marginLeft: 30,
     fontSize: tokens.font.xs,
     color: tokens.color.subtle,
     fontFamily: "Helvetica-Oblique",
   },
   checkPassSummary: {
-    marginTop: 4,
-    paddingTop: 4,
-    fontSize: tokens.font.xs,
-    color: tokens.color.muted,
-    fontFamily: "Helvetica-Oblique",
+    marginTop: 6,
+    paddingTop: 6,
+    fontSize: tokens.font.sm,
+    color: tokens.color.inkSoft,
+    fontFamily: "Helvetica-Bold",
   },
 
   // Per-page block (wraps across pages — no borders on this node).
@@ -440,6 +483,7 @@ const styles = StyleSheet.create({
   },
   actionPriorityCell: {
     width: 50,
+    alignItems: "center",
   },
   actionBody: {
     flex: 1,
@@ -589,6 +633,24 @@ function evidenceSummary(evidence: AuditCheckEvidence | undefined): string {
   return `Examples: ${first.join(", ")}${moreSuffix}${inspectorSuffix}`;
 }
 
+function guidanceSummary(evidence: AuditCheckEvidence | undefined): string {
+  const lines = evidence?.guidanceLines?.filter((l) => l.trim());
+  if (!lines?.length) return "";
+  return `Suggested next steps:\n${lines.map((l) => `• ${safeText(l)}`).join("\n")}`;
+}
+
+/** Short PDF rubric: how each AI subscore is read from the excerpt; complements model guidanceLines when present. */
+const AI_CHECK_SCORING_CONTEXT: Record<string, string> = {
+  ai_eeat:
+    "Score reflects trust and credibility cues visible in the excerpt—authorship, topical depth, citations, policies, and contact paths—not legal or clinical verification. Improve with clear bylines, dates, credentials, and concrete proof points editors can verify on-page.",
+  ai_content_depth:
+    "Score reflects how substantive the excerpt reads for the topic versus thin boilerplate. Improve with specific answers, examples, FAQs, and sections that match searcher intent.",
+  ai_scannability:
+    "Score reflects headings, lists, emphasis, and layout implied from the excerpt’s structure. Improve with logical H2/H3 hierarchy, bullets for steps, and short paragraphs so humans and models can skim.",
+  ai_entity_clarity:
+    "Score reflects whether title, headings, and body copy consistently name the primary organization/service/location the page is about. Improve by aligning H1 with the main offer, repeating the brand/geo plainly, and matching visible entities to JSON-LD where present.",
+};
+
 function describeEvidenceItem(item: AuditCheckEvidenceItem): string {
   if (item.type === "link") return safeText(item.anchor) || safeText(item.url);
   if (item.type === "image") return safeText(item.alt) || safeText(item.src);
@@ -604,18 +666,25 @@ function describeEvidenceItem(item: AuditCheckEvidenceItem): string {
 function StatusPill({ result }: { result: CheckResult }) {
   const c = statusColors(result);
   return (
-    <Text style={[styles.pill, { backgroundColor: c.bg, color: c.fg }]}>
-      {statusGlyph(result)}
-    </Text>
+    <View style={[styles.statusPillBox, { backgroundColor: c.bg }]}>
+      <Text
+        style={[
+          styles.statusPillGlyph,
+          { color: c.fg, ...(result === "pass" ? { fontSize: tokens.font.xs } : {}) },
+        ]}
+      >
+        {statusGlyph(result)}
+      </Text>
+    </View>
   );
 }
 
 function PriorityPill({ priority }: { priority: FixPriority | string }) {
   const c = priorityColors(priority);
   return (
-    <Text style={[styles.pill, { backgroundColor: c.bg, color: c.fg }]}>
-      {priorityLabel(priority)}
-    </Text>
+    <View style={[styles.priorityPillBox, { backgroundColor: c.bg }]}>
+      <Text style={[styles.priorityPillLabel, { color: c.fg }]}>{priorityLabel(priority)}</Text>
+    </View>
   );
 }
 
@@ -650,29 +719,37 @@ function SectionHeading({
 }
 
 function RunningHeader({
-  community,
+  leftTitle,
   auditDate,
 }: {
-  community: string;
+  leftTitle: string;
   auditDate: string;
 }) {
   return (
     <View style={styles.runningHeader}>
       <View style={styles.runningHeaderRow}>
-        <Text style={styles.runningHeaderLeft}>{community}</Text>
-        <Text>Visibility scan: {auditDate}</Text>
+        <Text style={styles.runningHeaderLeft}>{leftTitle}</Text>
+        <Text>{auditDate}</Text>
       </View>
       <View style={styles.runningHeaderHairline} />
     </View>
   );
 }
 
-function PdfFooter({ generated }: { generated: string }) {
+function PdfFooter({
+  brandName,
+  generated,
+}: {
+  brandName: string;
+  generated: string;
+}) {
   return (
     <View style={styles.footer}>
       <View style={styles.footerHairline} />
       <View style={styles.footerRow}>
-        <Text>RankLume — generated {generated}</Text>
+        <Text>
+          {brandName} — generated {generated}
+        </Text>
         <Text
           render={({ pageNumber, totalPages }) =>
             `Page ${pageNumber} / ${totalPages}`
@@ -716,14 +793,24 @@ function ChecksTable({
 
   const renderRow = (c: AuditCheck) => {
     const ev = showEvidence ? evidenceSummary(c.evidence) : "";
+    const guide = showEvidence ? guidanceSummary(c.evidence) : "";
+    const aiContext = AI_CHECK_SCORING_CONTEXT[c.key] ?? "";
     return (
       <View key={c.key} style={styles.checkRow} wrap={false}>
         <View style={styles.checkHeader}>
-          <StatusPill result={c.result} />
+          <View style={styles.checkStatusCell}>
+            <StatusPill result={c.result} />
+          </View>
           <Text style={styles.checkLabel}>{safeText(c.label)}</Text>
         </View>
         {c.explanation ? (
           <Text style={styles.checkExplanation}>{safeText(c.explanation)}</Text>
+        ) : null}
+        {aiContext ? (
+          <Text style={styles.checkScoringNote}>{safeText(aiContext)}</Text>
+        ) : null}
+        {guide ? (
+          <Text style={styles.checkEvidence}>{guide}</Text>
         ) : null}
         {ev ? <Text style={styles.checkEvidence}>{ev}</Text> : null}
       </View>
@@ -865,7 +952,6 @@ function PageBlock({
 }) {
   const seo = (page.seo_results ?? []) as AuditCheck[];
   const geo = (page.geo_results ?? []) as AuditCheck[];
-  const fixes = (page.fixes ?? []) as FixItem[];
   const url = safeText(page.url);
   const category =
     page.sitemap_category_label?.trim() || "Uncategorized";
@@ -899,40 +985,6 @@ function PageBlock({
         description={GEO_SECTION_DESCRIPTION}
         checks={geo}
       />
-
-      {fixes.length > 0 ? (
-        <View style={styles.pillarHeader}>
-          <Text style={styles.pillarTitle}>Suggested fixes for this page</Text>
-          <Text style={styles.pillarDescription}>
-            Ordered by priority. Repeated across pages? See the consolidated
-            action plan on its own page.
-          </Text>
-          {[...fixes]
-            .sort(
-              (a, b) =>
-                priorityWeight(a.priority) - priorityWeight(b.priority),
-            )
-            .map((fix, i) => (
-              <View
-                key={`${safeText(fix.title)}-${i}`}
-                style={styles.actionRow}
-                wrap={false}
-              >
-                <View style={styles.actionPriorityCell}>
-                  <PriorityPill priority={fix.priority} />
-                </View>
-                <View style={styles.actionBody}>
-                  <Text style={styles.actionTitle}>{safeText(fix.title)}</Text>
-                  {fix.detail ? (
-                    <Text style={styles.actionDetail}>
-                      {safeText(fix.detail)}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-            ))}
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -1039,9 +1091,8 @@ export function AuditReportPdfDocument({
   const companyName = safeText(company?.name);
   const communityName = safeText(community?.name || "Community");
   const websiteUrl = safeText(community?.website_url);
-  const headerCommunity = company?.name
-    ? `${communityName} · ${companyName}`
-    : communityName;
+  /** Organization shown in running header / footer (company when linked). */
+  const pdfBrandName = companyName || communityName;
 
   const actionItems = aggregateActionItems(pages);
   const headlineCounts = computeHeadlineCounts(
@@ -1061,9 +1112,9 @@ export function AuditReportPdfDocument({
 
   return (
     <Document
-      title={`RankLume visibility scan — ${communityName}`}
-      author="RankLume"
-      subject="SEO and GEO visibility scan report"
+      title={`${pdfBrandName} — SEO & GEO checks — ${communityName}`}
+      author={pdfBrandName}
+      subject="SEO and GEO checks report"
     >
       {/* Cover + executive summary + site-wide findings */}
       <Page
@@ -1072,13 +1123,11 @@ export function AuditReportPdfDocument({
         wrap
         bookmark={{ title: "Cover & executive summary", fit: true, expanded: true }}
       >
-        <PdfFooter generated={generated} />
+        <PdfFooter brandName={pdfBrandName} generated={generated} />
 
         {/* Cover hero (no running header on cover for cleaner look). */}
         <View style={styles.hero} wrap={false}>
-          <Text style={styles.heroEyebrow}>
-            RankLume — SEO &amp; GEO visibility scan
-          </Text>
+          <Text style={styles.heroEyebrow}>SEO &amp; GEO Checks</Text>
           <Text style={styles.heroTitle}>{communityName}</Text>
           {company?.name ? (
             <Text style={styles.heroSubtitle}>{companyName}</Text>
@@ -1093,12 +1142,12 @@ export function AuditReportPdfDocument({
               <Text style={styles.metaLabel}>Status</Text>
               <Text style={styles.metaValue}>{safeText(audit.status)}</Text>
             </View>
-            <View style={styles.metaItemSpaced}>
-              <Text style={styles.metaLabel}>Engine</Text>
-              <Text style={styles.metaValue}>
-                v{audit.engine_version ?? "—"}
-              </Text>
-            </View>
+            {typeof audit.engine_version === "number" ? (
+              <View style={styles.metaItemSpaced}>
+                <Text style={styles.metaLabel}>Engine</Text>
+                <Text style={styles.metaValue}>v{audit.engine_version}</Text>
+              </View>
+            ) : null}
           </View>
 
           {websiteUrl ? (
@@ -1231,15 +1280,11 @@ export function AuditReportPdfDocument({
           <Text style={styles.cardTitle}>Field metrics — Chrome UX Report</Text>
           <Text style={styles.cardDescription}>
             Origin-level p75 metrics from real Chrome users when available.
-            Missing without API keys, disabled API, or low traffic coverage.
           </Text>
           <ChecksTable checks={cruxFieldChecks} hidePass={false} />
         </View>
 
-        <RunningHeader
-          community={headerCommunity}
-          auditDate={auditDate}
-        />
+        <RunningHeader leftTitle={pdfBrandName} auditDate={auditDate} />
       </Page>
 
       {/* Prioritized action plan */}
@@ -1249,11 +1294,8 @@ export function AuditReportPdfDocument({
         wrap
         bookmark={{ title: "Prioritized action plan", fit: true }}
       >
-        <RunningHeader
-          community={headerCommunity}
-          auditDate={auditDate}
-        />
-        <PdfFooter generated={generated} />
+        <RunningHeader leftTitle={pdfBrandName} auditDate={auditDate} />
+        <PdfFooter brandName={pdfBrandName} generated={generated} />
 
         <SectionHeading
           eyebrow="Section 3"
@@ -1283,11 +1325,8 @@ export function AuditReportPdfDocument({
         wrap
         bookmark={{ title: "Per-page detail", fit: true }}
       >
-        <RunningHeader
-          community={headerCommunity}
-          auditDate={auditDate}
-        />
-        <PdfFooter generated={generated} />
+        <RunningHeader leftTitle={pdfBrandName} auditDate={auditDate} />
+        <PdfFooter brandName={pdfBrandName} generated={generated} />
 
         <SectionHeading
           eyebrow="Section 4"
@@ -1329,11 +1368,8 @@ export function AuditReportPdfDocument({
         wrap
         bookmark={{ title: "Appendix", fit: true }}
       >
-        <RunningHeader
-          community={headerCommunity}
-          auditDate={auditDate}
-        />
-        <PdfFooter generated={generated} />
+        <RunningHeader leftTitle={pdfBrandName} auditDate={auditDate} />
+        <PdfFooter brandName={pdfBrandName} generated={generated} />
 
         <SectionHeading
           eyebrow="Appendix A"

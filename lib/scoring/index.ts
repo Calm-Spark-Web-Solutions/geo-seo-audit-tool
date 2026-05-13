@@ -1,4 +1,7 @@
+import type { PageFetchMeta } from "@/lib/crawler/fetch";
 import type { AuditCheck, FixItem } from "@/types";
+
+import { probeBrokenInternalLinks } from "./broken-internal-links";
 
 import {
   generatePageAnalysis,
@@ -42,6 +45,22 @@ function fixesFromChecks(checks: AuditCheck[]): FixItem[] {
   return out;
 }
 
+function enrichFixesWithGuidance(checks: AuditCheck[], fixes: FixItem[]): FixItem[] {
+  const byLabel = new Map<string, AuditCheck>();
+  for (const c of checks) {
+    byLabel.set(c.label, c);
+  }
+  return fixes.map((f) => {
+    const c = byLabel.get(f.title);
+    const lines = c?.evidence?.guidanceLines?.filter((l) => l.trim());
+    if (!lines?.length) return f;
+    const extra =
+      "\n\nSuggested next steps:\n" +
+      lines.map((l, i) => `${i + 1}. ${l}`).join("\n");
+    return { ...f, detail: `${f.detail}${extra}` };
+  });
+}
+
 /**
  * Layered audit engine: deterministic cheerio checks, optional Google PSI,
  * optional Anthropic analysis. Each layer is independent — failures degrade gracefully.
@@ -49,17 +68,19 @@ function fixesFromChecks(checks: AuditCheck[]): FixItem[] {
 export async function scoreAndAnalyzePage({
   url,
   html,
+  fetchMeta,
 }: {
   url: string;
   html: string;
+  fetchMeta?: PageFetchMeta;
 }): Promise<PageScore> {
-  const det = runDeterministicChecks(html, url);
+  const det = runDeterministicChecks(html, url, { fetchMeta });
 
-  // PSI and Anthropic run concurrently; Anthropic consumes deterministic
-  // summaries only so the call shape stays cache-friendly.
-  const [psi, ai]: [
+  // PSI, Anthropic, and internal-link probes run concurrently.
+  const [psi, ai, brokenCheck]: [
     Awaited<ReturnType<typeof runPsi>>,
     AnthropicAnalysis,
+    AuditCheck,
   ] = await Promise.all([
     runPsi(url),
     generatePageAnalysis({
@@ -69,9 +90,10 @@ export async function scoreAndAnalyzePage({
       geoChecks: det.geoChecks,
       fixes: det.fixes,
     }),
+    probeBrokenInternalLinks(html, url),
   ]);
 
-  const seoChecks: AuditCheck[] = [...det.seoChecks, ...psi.seo];
+  const seoChecks: AuditCheck[] = [...det.seoChecks, ...psi.seo, brokenCheck];
   const geoChecks: AuditCheck[] = [...det.geoChecks, ...psi.geo, ...ai.geo];
 
   const seoScore = categoryScore(seoChecks);
@@ -80,7 +102,10 @@ export async function scoreAndAnalyzePage({
 
   // Recompute fixes against the merged check arrays so PSI/AI failures
   // surface in the suggested-fixes list too.
-  const fixes = [...fixesFromChecks(seoChecks), ...fixesFromChecks(geoChecks)];
+  const fixes = enrichFixesWithGuidance(
+    [...seoChecks, ...geoChecks],
+    [...fixesFromChecks(seoChecks), ...fixesFromChecks(geoChecks)],
+  );
 
   return {
     score,

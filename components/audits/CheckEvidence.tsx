@@ -189,8 +189,9 @@ export function CheckEvidence({
   pageId?: string;
   className?: string;
 }) {
-  const { items, totalCount, inspector } = evidence;
-  if (!items.length) return null;
+  const { items, totalCount, inspector, guidanceLines } = evidence;
+  const hasGuidance = guidanceLines?.some((l) => l.trim());
+  if (!items.length && !hasGuidance) return null;
   const groups = partitionItems(items);
   const inspectorTarget =
     inspector && auditId && pageId
@@ -204,6 +205,22 @@ export function CheckEvidence({
 
   return (
     <div className={cn("mt-2 flex flex-col gap-3", className)}>
+      {hasGuidance ? (
+        <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-foreground/80">
+            Suggested next steps
+          </p>
+          <ul className="mt-1.5 list-disc space-y-1 pl-4 text-xs leading-snug text-muted-foreground">
+            {(guidanceLines ?? [])
+              .map((l) => l.trim())
+              .filter(Boolean)
+              .map((line, i) => (
+                <li key={`g-${i}`}>{line}</li>
+              ))}
+          </ul>
+        </div>
+      ) : null}
+
       {groups.kvs.length > 0 ? (
         <ul className="flex flex-col gap-1.5">
           {groups.kvs.map((k, i) => (

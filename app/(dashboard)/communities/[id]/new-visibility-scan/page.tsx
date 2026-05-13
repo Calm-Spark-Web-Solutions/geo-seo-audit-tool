@@ -4,6 +4,7 @@ import { Gauge } from "lucide-react";
 
 import {
   StartAuditForm,
+  type PageRosterPreview,
   type ShardOption,
 } from "@/components/audits/StartAuditForm";
 import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
@@ -15,6 +16,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { loadBillingContext } from "@/lib/billing/billing-context";
+import { loadNewPagesAllowance } from "@/lib/billing/page-quota";
 import { userAllowedPaidProductFeatures } from "@/lib/billing/subscription-access";
 import { fetchSitemapShards } from "@/lib/crawler/sitemap";
 import { createClient } from "@/lib/supabase/server";
@@ -24,7 +27,6 @@ import type { Community } from "@/types";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const DEFAULT_MAX_PAGES = 100;
 // Hard ceiling on how many URLs we materialize per shard for the picker.
 // Matches the audit hard cap (1000) so anything past this couldn't have
 // been audited in a single run anyway.
@@ -91,6 +93,40 @@ export default async function NewAuditPage({
     };
   });
 
+  // Page roster preview so the form can show "X new vs Y rescans" and a
+  // hard stop when the user's selection would bust the new-page cap.
+  let pageRoster: PageRosterPreview | undefined;
+  if (user) {
+    const billingCtx = await loadBillingContext(supabase, user.id);
+    if (billingCtx.unlimited) {
+      pageRoster = {
+        trackedUrls: [],
+        newMonthlyCap: null,
+        rosterCap: null,
+        rosterUsed: 0,
+        newAddedThisMonth: 0,
+        unlimited: true,
+      };
+    } else {
+      const { data: rosterRows } = await supabase
+        .from("community_page_roster")
+        .select("url")
+        .eq("community_id", typed.id);
+      const allowance = await loadNewPagesAllowance(supabase, {
+        communityId: typed.id,
+        limits: billingCtx.limits,
+      });
+      pageRoster = {
+        trackedUrls: (rosterRows ?? []).map((r) => r.url as string),
+        newMonthlyCap: allowance.monthlyNewCap,
+        rosterCap: allowance.rosterCap,
+        rosterUsed: allowance.rosterUsed,
+        newAddedThisMonth: allowance.newAddedThisMonth,
+        unlimited: false,
+      };
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -105,10 +141,9 @@ export default async function NewAuditPage({
         title="Run new visibility scan"
         description={
           <span className="text-muted-foreground">
-            Pick which sitemap categories to include and how many URLs to
-            crawl. Each page is scored with deterministic checks plus PSI
-            and Anthropic commentary, so larger runs take proportionally
-            longer.
+            Pick which sitemap categories and URLs to include. Each page is
+            scored with deterministic checks plus PSI and Anthropic
+            commentary, so larger runs take proportionally longer.
           </span>
         }
       />
@@ -137,9 +172,9 @@ export default async function NewAuditPage({
           <StartAuditForm
             communityId={typed.id}
             shards={shards}
-            defaultMaxPages={DEFAULT_MAX_PAGES}
             stripeBillingEnabled={stripeOn}
             paidAccess={paidAccess}
+            pageRoster={pageRoster}
           />
         </CardContent>
       </Card>

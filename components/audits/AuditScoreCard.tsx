@@ -14,6 +14,22 @@ import {
 } from "@/components/ui/card";
 import type { Audit, AuditQueueDiagnostics, AuditStatus } from "@/types";
 
+function pendingRunnerHint(
+  queue: AuditQueueDiagnostics | null | undefined,
+): string | null {
+  if (!queue) {
+    return "No scan job row was found — the enqueue step may have failed, or data is still loading.";
+  }
+  const status = queue.jobStatus;
+  if (status === "queued") {
+    return "Waiting for the scan runner to pick up this job…";
+  }
+  if (status === "running") {
+    return "Runner claimed this job and is starting (site checks, then URL discovery)…";
+  }
+  return `Background job status: ${status ?? "unknown"}. If the scan does not progress, try Retry runner.`;
+}
+
 export function AuditScoreCard({
   audit,
   queue,
@@ -29,6 +45,12 @@ export function AuditScoreCard({
     audit.status === "pending" &&
     progressTotal > 0 &&
     audit.pages_crawled === 0;
+  const showPendingQueueHint =
+    audit.status === "pending" && progressTotal === 0 && isRunning;
+  const devRunnerEnvHint =
+    typeof process !== "undefined" &&
+    process.env.NODE_ENV === "development" &&
+    queue?.jobStatus === "queued";
 
   return (
     <Card>
@@ -89,6 +111,27 @@ export function AuditScoreCard({
               busy
               indeterminate={indeterminateProgress}
             />
+            {showPendingQueueHint ? (
+              <p
+                role="status"
+                className="text-xs leading-relaxed text-muted-foreground"
+              >
+                {pendingRunnerHint(queue)}
+                {devRunnerEnvHint ? (
+                  <>
+                    {" "}
+                    <span className="text-foreground/80">
+                      Locally, ensure{" "}
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
+                        NEXT_PUBLIC_SITE_URL
+                      </code>{" "}
+                      is a base URL this dev server can reach — the app POSTs
+                      the runner kick to that host.
+                    </span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             <p className="text-xs leading-relaxed text-muted-foreground">
               {AUDIT_RUNNING_EXPECTATION}
             </p>

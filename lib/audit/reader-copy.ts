@@ -6,7 +6,7 @@ export const SEO_SECTION_DESCRIPTION =
 
 export const GEO_SECTION_TITLE = "GEO (AI-ready content)";
 export const GEO_SECTION_DESCRIPTION =
-  "How well AI systems can understand, quote, and reuse your content — structure, depth, and clarity.";
+  "How well AI systems can understand, quote, and reuse your content — structure, depth, and clarity. AI subscores (0–100) are model judgments on the visible text excerpt for each URL; when captured, bulleted “Suggested next steps” appear under each AI row.";
 
 export const HOW_TO_READ_AUDIT =
   "Each line is a single check on this page snapshot. Pass means we did not flag an issue. Warning means something to review or improve. Fail means we recommend fixing it when you can.";

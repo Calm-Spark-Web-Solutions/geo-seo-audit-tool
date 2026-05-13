@@ -138,7 +138,9 @@ export async function GET(
 
   const { data: jobRow } = await supabase
     .from("audit_jobs")
-    .select("last_error, attempts, max_attempts")
+    .select(
+      "id, status, lease_until, updated_at, last_error, attempts, max_attempts",
+    )
     .eq("audit_id", id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -149,6 +151,10 @@ export async function GET(
         lastError: jobRow.last_error,
         attempts: jobRow.attempts,
         maxAttempts: jobRow.max_attempts,
+        jobId: jobRow.id,
+        jobStatus: jobRow.status as AuditQueueDiagnostics["jobStatus"],
+        leaseUntil: jobRow.lease_until,
+        jobUpdatedAt: jobRow.updated_at,
       }
     : null;
 

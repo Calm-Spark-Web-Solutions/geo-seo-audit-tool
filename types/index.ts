@@ -29,6 +29,11 @@ export interface AuditQueueDiagnostics {
   lastError: string | null;
   attempts: number;
   maxAttempts: number;
+  /** Present when a job row exists; correlates with `audit_jobs.id`. */
+  jobId: string | null;
+  jobStatus: AuditJobStatus | null;
+  leaseUntil: string | null;
+  jobUpdatedAt: string | null;
 }
 
 export type CheckResult = "pass" | "warn" | "fail";
@@ -140,6 +145,11 @@ export interface AuditCheckEvidence {
   items: AuditCheckEvidenceItem[];
   /** Inspector route slug (under per-page audit detail) where the full list lives. */
   inspector?: "links" | "images" | "schema" | "lighthouse";
+  /**
+   * Imperative next steps for implementers (e.g. AI GEO subscores).
+   * Shown in PDF / UI below the explanation, separate from `items` examples.
+   */
+  guidanceLines?: string[];
 }
 
 export interface AuditCheck {
@@ -191,6 +201,12 @@ export interface Subscription {
   stripe_sub_id: string | null;
   plan: string | null;
   status: string | null;
+  /**
+   * Optional per-account override (`PlanLimits` shape) — `null` means "use
+   * the slug defaults from `lib/billing/plan-limits.ts`". The Stripe webhook
+   * mirrors the subscription item's quantity here as `{ communities: N }`.
+   */
+  plan_limits: Record<string, unknown> | null;
   created_at: string;
 }
 

@@ -15,6 +15,15 @@ const PROTECTED_PREFIXES = [
 const AUTH_PATHS = new Set(["/login", "/signup"]);
 
 function isProtected(path: string): boolean {
+  // Server-to-server runner endpoints authenticate themselves via shared-secret
+  // headers in their own route handlers (x-audit-runner-token for /run, plus
+  // Authorization: Bearer $CRON_SECRET for cron-tick), so the cookie-based
+  // middleware must let them through — otherwise the redirect-to-/login here
+  // would intercept the runner kick before its own auth check runs and the
+  // job would stay wedged in `queued` forever.
+  if (path === "/api/visibility-scans/cron-tick") return false;
+  if (/^\/api\/visibility-scans\/[^/]+\/run$/.test(path)) return false;
+
   // /api/invites/accept must remain reachable so authenticated invitees can
   // post to it; any other /api/invites endpoint requires auth.
   if (path === "/api/invites/accept") return true;

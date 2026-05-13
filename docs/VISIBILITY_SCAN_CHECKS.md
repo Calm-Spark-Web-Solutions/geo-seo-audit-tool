@@ -28,9 +28,12 @@ Deterministic parsing of each fetched page’s HTML (no browser). Checks are spl
 | `webp_surface` | WebP / responsive images |
 | `clean_url_query` | URL query string complexity |
 | `https` | HTTPS |
+| `mixed_content_html` | Passive mixed content (HTML) |
 | `canonical` | Canonical link |
 | `viewport` | Mobile viewport |
-| `robots_meta` | Robots meta |
+| `robots_meta` | Indexability (robots + headers) |
+| `redirect_chain` | Redirect chain (fetch) *(when fetch metadata is available)* |
+| `fetch_final_url` | Fetched URL vs requested URL *(when fetch metadata is available)* |
 | `og_tags` | Open Graph tags |
 | `twitter_card` | Twitter card |
 | `hreflang` | hreflang alternates |
@@ -41,6 +44,7 @@ Deterministic parsing of each fetched page’s HTML (no browser). Checks are spl
 |-----|------------|
 | `img_alt` | Image alt text |
 | `word_count` | Content depth (word count) |
+| `blog_editorial_depth` | Blog / editorial depth (heuristic) |
 | `semantic_landmarks` | Semantic landmarks |
 | `faq_heading` | FAQ-style heading |
 | `json_ld` | Structured data (JSON-LD) |
@@ -66,6 +70,17 @@ Deterministic parsing of each fetched page’s HTML (no browser). Checks are spl
 | `schema_org_name_offline` | Organization name (offline) |
 | `schema_website_url_offline` | WebSite URL (offline) |
 | `schema_local_address_offline` | Local entity address (offline) |
+| `schema_review_shape_offline` | Review schema shape (offline) |
+| `schema_aggregate_shape_offline` | AggregateRating schema shape (offline) |
+| `schema_trust_reviews_hint` | Trust signals: reviews in JSON-LD |
+
+### Internal link probes (`lib/scoring/broken-internal-links.ts`)
+
+**Requires** the audit runner HTML fetch path (same as visibility scans). Bounded HEAD/GET sample of same-origin links from each page.
+
+| Key | Label (UI) |
+|-----|------------|
+| `internal_link_health` | Internal link reachability (sampled) |
 
 ### AI commentary and GEO subscores (`lib/scoring/anthropic-scores.ts`)
 
@@ -119,28 +134,34 @@ Once per audit, against the community website origin:
 | `sitewide_ai_bot_access` | AI crawler access (GPTBot / ClaudeBot / PerplexityBot) |
 | `sitewide_sitemap` | XML sitemap discoverable |
 
+### Crawl graph (audited URL set) (`lib/scoring/crawl-graph.ts`)
+
+Once per audit after pages are fetched; uses only links between URLs in this run.
+
+| Key | Label (UI) |
+|-----|------------|
+| `crawl_graph_orphans` | Internal orphans (audited set) |
+| `crawl_graph_depth` | Internal crawl depth (from seed) |
+| `crawl_graph_generic_anchors` | Internal anchor text quality (sampled graph) |
+
 ### Chrome UX Report — origin field metrics (`lib/scoring/crux.ts`)
 
 **Requires** `CRUX_API_KEY` or `PSI_API_KEY` (same GCP project often works when CrUX API is enabled). If no key or no dataset, you may see a single summary row with a warn explanation instead of metrics.
 
-Possible rows:
+Possible rows (new audits use **phone** and **desktop** cohort keys; legacy rows may use the older keys without a form-factor prefix):
 
 | Key | Label (UI) |
 |-----|------------|
-| `crux_api` / `crux_record` / `crux_data` | Chrome UX Report (field data) *(summary / availability)* |
-| `crux_lcp_p75` | CrUX LCP (p75) |
-| `crux_inp_p75` | CrUX INP (p75) |
-| `crux_cls_p75` | CrUX CLS (p75) |
-| `crux_fcp_p75` | CrUX FCP (p75) |
-
-### Accessibility — axe-core in jsdom (`lib/scoring/axe-a11y.ts`)
-
-**Requires** `AUDIT_RUN_AXE=1` or `AUDIT_RUN_AXE=true`. Disabled by default (latency / jsdom limits).
-
-| Key | Label (UI) |
-|-----|------------|
-| `axe_wcag` | WCAG scans (axe-core) |
-| `axe_run` | Accessibility (axe-core) *(warn when the run fails or times out)* |
+| `crux_api` | Chrome UX Report *(top-level failure only)* |
+| `crux_phone_api` / `crux_desktop_api` | Chrome UX Report — Mobile (phone) / Desktop *(API or coverage message)* |
+| `crux_phone_record` / `crux_desktop_record` | Chrome UX Report — cohort *(empty record)* |
+| `crux_phone_empty` / `crux_desktop_empty` | Chrome UX Report — cohort *(no histograms)* |
+| `crux_phone_data` / `crux_desktop_data` | Chrome UX Report — cohort *(summary “has data”)* |
+| `crux_phone_lcp_p75` / `crux_desktop_lcp_p75` | CrUX LCP (p75) — cohort |
+| `crux_phone_inp_p75` / `crux_desktop_inp_p75` | CrUX INP (p75) — cohort |
+| `crux_phone_cls_p75` / `crux_desktop_cls_p75` | CrUX CLS (p75) — cohort |
+| `crux_phone_fcp_p75` / `crux_desktop_fcp_p75` | CrUX FCP (p75) — cohort |
+| `crux_lcp_p75` / `crux_inp_p75` / `crux_cls_p75` / `crux_fcp_p75` | Legacy CrUX metric keys *(older persisted audits)* |
 
 ---
 
@@ -214,5 +235,4 @@ These are **not** produced by the automated scorer. They are template rows for h
 | PSI / Lighthouse | `lib/scoring/psi.ts` |
 | Site-wide probes | `lib/scoring/site-wide.ts` |
 | CrUX origin metrics | `lib/scoring/crux.ts` |
-| axe-core | `lib/scoring/axe-a11y.ts` |
 | Manual checklist template | `lib/checklists/community-manual.ts` |

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { BillingAlert } from "@/components/billing/BillingAlert";
+import { BillingUsageCard } from "@/components/billing/BillingUsageCard";
 import { PricingCards } from "@/components/billing/PricingCards";
 import { ProfileSettingsSection } from "@/components/settings/ProfileSettingsSection";
 import { SettingsOrganizationsSection } from "@/components/settings/SettingsOrganizationsSection";
@@ -16,7 +17,11 @@ import {
 import {
   formatPlanLabel,
   formatSubscriptionStatus,
+  formatUsd,
+  PUBLIC_TIERS,
 } from "@/lib/billing/plans";
+import { PACK_PRICING, resolvePlanLimits } from "@/lib/billing/plan-limits";
+import { loadBillingUsageSnapshot } from "@/lib/billing/usage-snapshot";
 import { createClient } from "@/lib/supabase/server";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import type { Subscription } from "@/types";
@@ -64,11 +69,9 @@ export default async function SettingsPage({
   const meta = (user.user_metadata ?? {}) as {
     full_name?: string | null;
     name?: string | null;
-    avatar_url?: string | null;
   };
   const profileInitialName =
     meta.full_name ?? meta.name ?? "";
-  const profileInitialAvatar = meta.avatar_url ?? "";
 
   const { data: subRow } = await supabase
     .from("subscriptions")
@@ -78,6 +81,62 @@ export default async function SettingsPage({
 
   const subscription = subRow as Subscription | null;
   const stripeConfigured = isStripeConfigured();
+  const usageSnapshot = await loadBillingUsageSnapshot(supabase, user.id);
+
+  // Compute the per-community unit price + total for the "Current plan" card
+  // so the customer sees exactly what they're paying for. Falls back to a
+  // simple plan label when the slug isn't one of the public tiers.
+  const planSlug = subscription?.plan ?? null;
+  const planLimits = resolvePlanLimits(planSlug, subscription?.plan_limits ?? null);
+  const planTier = PUBLIC_TIERS.find(
+    (t) => t.monthlyKey === planSlug || t.yearlyKey === planSlug,
+  );
+  const planCycle: "monthly" | "yearly" | null = planSlug
+    ? planSlug.endsWith("_yearly")
+      ? "yearly"
+      : "monthly"
+    : null;
+  const communityCount = planLimits.communities ?? 1;
+  const unitPrice =
+    planTier && planCycle === "yearly"
+      ? planTier.yearlyUnitUsd
+      : planTier
+        ? planTier.monthlyUnitUsd
+        : null;
+
+  // Page Pack bonus = (packs × communities × unitPrice) on top of the tier
+  // line. We derive `packs` from the override's bonus knob so it stays a
+  // single source of truth.
+  const bonusPerCommunity = planLimits.newPagesPackBonusPerMonth ?? 0;
+  const packsPerCommunity =
+    bonusPerCommunity > 0
+      ? Math.round(bonusPerCommunity / PACK_PRICING.newPagesPerUnit)
+      : 0;
+  const packUnitPrice =
+    planCycle === "yearly"
+      ? PACK_PRICING.unitYearlyUsd
+      : PACK_PRICING.unitMonthlyUsd;
+  const packTotal = packsPerCommunity * communityCount * packUnitPrice;
+
+  const cycleSuffix = planCycle === "yearly" ? "/yr" : "/mo";
+  const tierTotalLine =
+    planTier && unitPrice !== null && planCycle
+      ? `${communityCount.toLocaleString()} ${
+          communityCount === 1 ? "community" : "communities"
+        } × ${formatUsd(unitPrice)}${cycleSuffix} = ${formatUsd(
+          unitPrice * communityCount,
+        )}${cycleSuffix}`
+      : null;
+  const packTotalLine =
+    packsPerCommunity > 0 && planCycle
+      ? `${packsPerCommunity} pack${packsPerCommunity === 1 ? "" : "s"} × ${communityCount.toLocaleString()} ${
+          communityCount === 1 ? "community" : "communities"
+        } × ${formatUsd(packUnitPrice)}${cycleSuffix} = ${formatUsd(packTotal)}${cycleSuffix}`
+      : null;
+  const grandTotalLine =
+    planTier && unitPrice !== null && planCycle && packsPerCommunity > 0
+      ? `${formatUsd(unitPrice * communityCount + packTotal)}${cycleSuffix}`
+      : null;
 
   return (
     <>
@@ -85,7 +144,7 @@ export default async function SettingsPage({
         title={activeTab === "profile" ? "Profile" : "Settings"}
         description={
           activeTab === "profile"
-            ? "Update the name and photo shown in the app."
+            ? "Update the name shown in the app."
             : "Manage billing and who can access your organizations."
         }
       />
@@ -95,7 +154,6 @@ export default async function SettingsPage({
           <ProfileSettingsSection
             email={user.email ?? ""}
             initialFullName={profileInitialName}
-            initialAvatarUrl={profileInitialAvatar}
           />
         ) : activeTab === "billing" ? (
             <>
@@ -130,6 +188,32 @@ export default async function SettingsPage({
                       {formatSubscriptionStatus(subscription?.status)}
                     </span>
                   </p>
+                  {tierTotalLine ? (
+                    <p>
+                      <span className="text-muted-foreground">Tier: </span>
+                      <span className="font-medium tabular-nums">
+                        {tierTotalLine}
+                      </span>
+                    </p>
+                  ) : null}
+                  {packTotalLine ? (
+                    <p>
+                      <span className="text-muted-foreground">
+                        Page Packs:{" "}
+                      </span>
+                      <span className="font-medium tabular-nums">
+                        {packTotalLine}
+                      </span>
+                    </p>
+                  ) : null}
+                  {grandTotalLine ? (
+                    <p>
+                      <span className="text-muted-foreground">Total: </span>
+                      <span className="font-semibold tabular-nums">
+                        {grandTotalLine}
+                      </span>
+                    </p>
+                  ) : null}
                   {!stripeConfigured ? (
                     <p className="pt-2 text-muted-foreground">
                       Billing is temporarily unavailable. Please contact support.
@@ -138,11 +222,17 @@ export default async function SettingsPage({
                 </CardContent>
               </Card>
 
+              <BillingUsageCard snapshot={usageSnapshot} />
+
               <div className="space-y-3">
-                <h2 className="text-lg font-semibold tracking-tight">Pricing</h2>
+                <h2 className="text-lg font-semibold tracking-tight">
+                  Build your plan
+                </h2>
                 <p className="text-sm text-muted-foreground">
-                  Choose a public tier below, or read about the Partner program
-                  for invitation-only pricing.
+                  Pick the number of communities you need, choose a per-community
+                  tier, and switch between monthly and yearly billing. The
+                  Partner program covers organizations larger than this builder
+                  supports.
                 </p>
                 <PricingCards
                   subscription={subscription}

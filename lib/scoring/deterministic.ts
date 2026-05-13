@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 
+import type { PageFetchMeta } from "@/lib/crawler/fetch";
 import { normalizeUrl, sameOrigin } from "@/lib/crawler/normalize";
 import type {
   AuditCheck,
@@ -116,6 +117,9 @@ const KNOWN_SCHEMA_TYPES = new Set([
   "WebSite",
   "AboutPage",
   "ContactPage",
+  "Review",
+  "AggregateRating",
+  "Rating",
 ]);
 
 const BCP47_LIKE = /^(?:x-default|[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-\d{3})?)$/;
@@ -124,9 +128,15 @@ const BCP47_LIKE = /^(?:x-default|[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-\d{
  * Pure-cheerio deterministic checks. No network calls. Stable keys are the
  * contract for the diff layer and the Anthropic rubric.
  */
+export interface DeterministicOptions {
+  /** When present (audit runner HTML fetch), enables redirect + header checks. */
+  fetchMeta?: PageFetchMeta;
+}
+
 export function runDeterministicChecks(
   html: string,
   pageUrl: string,
+  options?: DeterministicOptions,
 ): DeterministicResult {
   const $ = cheerio.load(html);
   const ldScriptsEarly = $('script[type="application/ld+json"]').toArray();
@@ -149,9 +159,6 @@ export function runDeterministicChecks(
         : titleLen > 60
           ? `Title is long (${titleLen} chars). Aim for roughly 50–60 to avoid truncation.`
           : "Title length is in the target band for SERPs.";
-  if (titleLen > 0) {
-    titleExplanation += ` Current title: ${JSON.stringify(snippetForUi(titleText))}.`;
-  }
 
   const metaDesc =
     $('meta[name="description"]').attr("content")?.trim() ?? "";
@@ -170,9 +177,6 @@ export function runDeterministicChecks(
         : descLen > 160
           ? `Meta description is longer than the ideal band (${descLen} chars). Aim for roughly 140–160.`
           : "Meta description length is in the target band.";
-  if (descLen > 0) {
-    descExplanation += ` Current meta description: ${JSON.stringify(snippetForUi(metaDesc))}.`;
-  }
 
   const h1Els = $("h1").toArray();
   const h1Count = h1Els.length;
@@ -252,6 +256,58 @@ export function runDeterministicChecks(
     /* keep fail */
   }
 
+  let isHttpsPage = false;
+  try {
+    isHttpsPage = new URL(pageUrl).protocol === "https:";
+  } catch {
+    /* ignore */
+  }
+
+  const httpSubresources: string[] = [];
+  if (isHttpsPage) {
+    const pushHttp = (raw: string | undefined) => {
+      const v = raw?.trim();
+      if (v?.startsWith("http://")) httpSubresources.push(v);
+    };
+    $("[href],[src],[poster]").each((_, el) => {
+      const $el = $(el);
+      pushHttp($el.attr("href"));
+      pushHttp($el.attr("src"));
+      pushHttp($el.attr("poster"));
+    });
+    $("[srcset]").each((_, el) => {
+      const raw = $(el).attr("srcset");
+      if (!raw) return;
+      for (const part of raw.split(",")) {
+        const u = part.trim().split(/\s+/)[0]?.trim();
+        if (u?.startsWith("http://")) httpSubresources.push(u);
+      }
+    });
+    $('link[rel="stylesheet"][href]').each((_, el) => {
+      pushHttp($(el).attr("href"));
+    });
+  }
+  const mixedUnique = [...new Set(httpSubresources)].slice(0, 25);
+  const mixedResult: CheckResult =
+    !isHttpsPage ? "pass" : mixedUnique.length === 0 ? "pass" : "fail";
+  const mixedExplanation =
+    !isHttpsPage
+      ? "Mixed-content scan applies to HTTPS pages only."
+      : mixedUnique.length === 0
+        ? "No obvious http:// subresources in HTML attributes on this HTTPS URL."
+        : `${mixedUnique.length} http:// asset reference(s) in HTML — browsers may block active mixed content.`;
+  const mixedEvidence: AuditCheckEvidence | undefined =
+    mixedUnique.length > 0
+      ? {
+          totalCount: mixedUnique.length,
+          items: mixedUnique.map((u) => ({
+            type: "kv" as const,
+            label: "http URL",
+            value: snippetForUi(u, 200),
+          })),
+        }
+      : undefined;
+
   // ---------- new SEO checks ----------
 
   const canonicalHref = $('link[rel="canonical"]').attr("href")?.trim();
@@ -285,20 +341,36 @@ export function runDeterministicChecks(
       : "Missing <meta name=\"viewport\"> for mobile rendering.";
 
   const robotsMeta = $('meta[name="robots"]').attr("content")?.toLowerCase() ?? "";
-  const hasNoindex = /\bnoindex\b/.test(robotsMeta);
-  const hasNofollow = /\bnofollow\b/.test(robotsMeta);
+  const googlebotMeta =
+    $('meta[name="googlebot"]').attr("content")?.toLowerCase() ?? "";
+  const xRobotsHeader =
+    options?.fetchMeta?.responseHeadersLower["x-robots-tag"]?.toLowerCase() ?? "";
+  const hasNoindex =
+    /\bnoindex\b/.test(robotsMeta) ||
+    /\bnoindex\b/.test(googlebotMeta) ||
+    /\bnoindex\b/.test(xRobotsHeader);
+  const hasNofollow =
+    /\bnofollow\b/.test(robotsMeta) ||
+    /\bnofollow\b/.test(googlebotMeta) ||
+    /\bnofollow\b/.test(xRobotsHeader);
   const robotsResult: CheckResult = hasNoindex
     ? "fail"
     : hasNofollow
       ? "warn"
       : "pass";
-  const robotsExplanation = hasNoindex
-    ? "robots meta contains noindex; this page will not be indexed."
-    : hasNofollow
-      ? "robots meta contains nofollow; outbound link signals are dropped."
-      : robotsMeta
-        ? `robots meta: ${robotsMeta}`
-        : "No restrictive robots meta tag (default: indexable).";
+  let robotsExplanation = "No restrictive robots signals in meta or response headers (default: indexable).";
+  if (hasNoindex) {
+    const bits: string[] = [];
+    if (/\bnoindex\b/.test(robotsMeta)) bits.push("meta robots");
+    if (/\bnoindex\b/.test(googlebotMeta)) bits.push("meta googlebot");
+    if (/\bnoindex\b/.test(xRobotsHeader)) bits.push("X-Robots-Tag header");
+    robotsExplanation = `noindex detected (${bits.join(", ")}); this URL is unlikely to be indexed.`;
+  } else if (hasNofollow) {
+    robotsExplanation =
+      "nofollow detected in robots-related tags — outbound link signals may be limited.";
+  } else if (robotsMeta || googlebotMeta || xRobotsHeader) {
+    robotsExplanation = `Robots-related directives: ${[robotsMeta, googlebotMeta, xRobotsHeader].filter(Boolean).join(" | ")}`;
+  }
 
   const ogTitle = $('meta[property="og:title"]').attr("content")?.trim();
   const ogDesc = $('meta[property="og:description"]').attr("content")?.trim();
@@ -577,12 +649,95 @@ export function runDeterministicChecks(
   const viewportEvidence: AuditCheckEvidence | undefined = viewportMeta
     ? { items: [{ type: "kv", label: "viewport", value: viewportMeta }] }
     : undefined;
-  const robotsEvidence: AuditCheckEvidence | undefined = robotsMeta
-    ? { items: [{ type: "kv", label: "robots", value: robotsMeta }] }
-    : undefined;
+  const robotsEvidenceItems: AuditCheckEvidenceItem[] = [];
+  if (robotsMeta) {
+    robotsEvidenceItems.push({ type: "kv", label: "meta robots", value: robotsMeta });
+  }
+  if (googlebotMeta) {
+    robotsEvidenceItems.push({
+      type: "kv",
+      label: "meta googlebot",
+      value: googlebotMeta,
+    });
+  }
+  if (xRobotsHeader) {
+    robotsEvidenceItems.push({
+      type: "kv",
+      label: "X-Robots-Tag",
+      value: snippetForUi(xRobotsHeader, 240),
+    });
+  }
+  const robotsEvidence: AuditCheckEvidence | undefined =
+    robotsEvidenceItems.length > 0 ? { items: robotsEvidenceItems } : undefined;
   const langEvidence: AuditCheckEvidence | undefined = htmlLangRaw
     ? { items: [{ type: "kv", label: "html lang", value: htmlLangRaw }] }
     : undefined;
+
+  const fetchMetaSeoChecks: AuditCheck[] = [];
+  if (options?.fetchMeta) {
+    const m = options.fetchMeta;
+    let redResult: CheckResult = "pass";
+    let redExpl = `Fetched this HTML in ${m.redirectHopCount} redirect hop(s).`;
+    if (m.redirectLoop) {
+      redResult = "fail";
+      redExpl = "Redirect loop detected while fetching this page.";
+    } else if (m.redirectHopCount > 5) {
+      redResult = "fail";
+      redExpl = `Long redirect chain (${m.redirectHopCount} hops) — slows crawlers and users.`;
+    } else if (m.redirectHopCount > 2) {
+      redResult = "warn";
+      redExpl = `${m.redirectHopCount} redirect hop(s) before HTML — simplify chains where possible.`;
+    }
+    const redItems: AuditCheckEvidenceItem[] = m.redirectChain
+      .slice(0, 12)
+      .map(
+        (h): AuditCheckEvidenceItem => ({
+          type: "kv",
+          label: `HTTP ${h.status}`,
+          value: snippetForUi(h.url, 200),
+        }),
+      );
+    fetchMetaSeoChecks.push(
+      check(
+        "redirect_chain",
+        "Redirect chain (fetch)",
+        redResult,
+        redExpl,
+        {
+          category: "Crawlability",
+          pillar: "SEO",
+          evidence:
+            redItems.length > 0
+              ? { totalCount: m.redirectChain.length, items: redItems }
+              : undefined,
+        },
+      ),
+    );
+
+    const reqN = normalizeUrl(pageUrl);
+    const finN = normalizeUrl(m.finalUrl);
+    let urlRes: CheckResult = "pass";
+    let urlExpl = "Fetched URL matches requested URL after normalization.";
+    if (reqN && finN && reqN !== finN) {
+      urlRes = "warn";
+      urlExpl =
+        "Request URL and final URL differ after normalization — confirm redirects and canonicals.";
+    } else if (!reqN || !finN) {
+      urlRes = "warn";
+      urlExpl = "Could not normalize request/final URLs for comparison.";
+    }
+    const urlItems: AuditCheckEvidenceItem[] = [
+      ...(reqN ? [{ type: "kv" as const, label: "Requested", value: reqN }] : []),
+      ...(finN ? [{ type: "kv" as const, label: "Final", value: finN }] : []),
+    ];
+    fetchMetaSeoChecks.push(
+      check("fetch_final_url", "Fetched URL vs requested URL", urlRes, urlExpl, {
+        category: "Crawlability",
+        pillar: "SEO",
+        ...(urlItems.length > 0 ? { evidence: { items: urlItems } } : {}),
+      }),
+    );
+  }
 
   const seoChecks: AuditCheck[] = [
     check("html_lang", "Document language (<html lang>)", langResult, langExplanation, {
@@ -638,6 +793,17 @@ export function runDeterministicChecks(
       category: "Crawlability",
       pillar: "SEO",
     }),
+    check(
+      "mixed_content_html",
+      "Passive mixed content (HTML)",
+      mixedResult,
+      mixedExplanation,
+      {
+        category: "Crawlability",
+        pillar: "SEO",
+        evidence: mixedEvidence,
+      },
+    ),
     check("canonical", "Canonical link", canonicalResult, canonicalExplanation, {
       category: "Crawlability",
       pillar: "SEO",
@@ -648,11 +814,12 @@ export function runDeterministicChecks(
       pillar: "SEO",
       evidence: viewportEvidence,
     }),
-    check("robots_meta", "Robots meta", robotsResult, robotsExplanation, {
+    check("robots_meta", "Indexability (robots + headers)", robotsResult, robotsExplanation, {
       category: "Crawlability",
       pillar: "SEO",
       evidence: robotsEvidence,
     }),
+    ...fetchMetaSeoChecks,
     check("og_tags", "Open Graph tags", ogResult, ogExplanation, {
       category: "Social metadata",
       pillar: "SEO",
@@ -961,11 +1128,53 @@ export function runDeterministicChecks(
     captionExplanation = "Images present but no <figcaption>; captions help AI summaries cite images.";
   }
 
+  let pathLower = "";
+  try {
+    pathLower = new URL(pageUrl).pathname.toLowerCase();
+  } catch {
+    /* ignore */
+  }
+  const looksEditorial =
+    /\/(blog|news|articles|insights)(\/|$)/i.test(pathLower);
+  let thinBlogResult: CheckResult = "pass";
+  let thinBlogExplanation =
+    "URL path is not classified as blog/news/articles/insights for the thin-content heuristic.";
+  if (looksEditorial) {
+    if (wordCount >= 320 && h234Count >= 2) {
+      thinBlogResult = "pass";
+      thinBlogExplanation =
+        "Editorial-style URL with reasonable word count and subheading structure.";
+    } else {
+      thinBlogResult = "warn";
+      thinBlogExplanation = `Editorial-style URL path (${pathLower}) shows relatively low depth (~${wordCount} words, ${h234Count} H2–H4) — consider richer guidance for readers and AI citations.`;
+    }
+  }
+  const thinBlogEvidence: AuditCheckEvidence | undefined =
+    looksEditorial && (wordCount < 320 || h234Count < 2)
+      ? {
+          items: [
+            { type: "kv", label: "Words", value: String(wordCount) },
+            { type: "kv", label: "H2–H4", value: String(h234Count) },
+          ],
+        }
+      : undefined;
+
   const geoChecks: AuditCheck[] = [
     check("word_count", "Content depth (word count)", wcResult, wcExplanation, {
       category: "Content readiness",
       pillar: "GEO",
     }),
+    check(
+      "blog_editorial_depth",
+      "Blog / editorial depth (heuristic)",
+      thinBlogResult,
+      thinBlogExplanation,
+      {
+        category: "Content readiness",
+        pillar: "GEO",
+        evidence: thinBlogEvidence,
+      },
+    ),
     check(
       "semantic_landmarks",
       "Semantic landmarks",

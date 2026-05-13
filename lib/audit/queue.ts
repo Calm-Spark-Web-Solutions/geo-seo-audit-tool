@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { devRunnerConsole } from "@/lib/audit/dev-runner-console";
 import { markAuditFailed, runAudit } from "@/lib/audit/run";
 import { observabilityLog } from "@/lib/observability/log";
 
@@ -253,13 +254,27 @@ export async function claimAndRunOne(
     .limit(1)
     .maybeSingle();
 
-  if (error || !data) return "missing";
+  if (error || !data) {
+    devRunnerConsole("claimAndRunOne: missing", { auditId });
+    return "missing";
+  }
   const job = data as JobRow;
 
   const won = await tryClaim(supabase, job);
-  if (!won) return "skipped";
+  if (!won) {
+    devRunnerConsole("claimAndRunOne: skipped (lease held)", {
+      auditId,
+      jobId: job.id,
+    });
+    return "skipped";
+  }
 
+  devRunnerConsole("claimAndRunOne: claimed, runJob starting", {
+    auditId,
+    jobId: job.id,
+  });
   await runJob(supabase, { ...job, attempts: job.attempts + 1 });
+  devRunnerConsole("claimAndRunOne: runJob finished", { auditId, jobId: job.id });
   return "claimed";
 }
 

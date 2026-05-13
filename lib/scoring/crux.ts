@@ -7,6 +7,8 @@ const CRUX_ENDPOINT =
   "https://chromeuxreport.googleapis.com/v1/records:queryRecord";
 const CRUX_TIMEOUT_MS = 15_000;
 
+type CruxFormFactor = "PHONE" | "DESKTOP";
+
 function row(
   key: string,
   label: string,
@@ -24,7 +26,6 @@ function row(
   };
 }
 
-/** Metric rows include structured p75 values for the beginner vitals dashboard. */
 function metricRow(
   key: string,
   label: string,
@@ -44,7 +45,6 @@ function joinExplanation(base: string, suggestions: string): string {
   return `${base}\n\n${s}`;
 }
 
-/** Actionable tips keyed by pass / warn / fail (field data is slower to move than lab scores). */
 function lcpSuggestions(result: CheckResult): string {
   if (result === "pass") {
     return (
@@ -120,10 +120,169 @@ function readP75(metric: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function cohortLabel(ff: CruxFormFactor): string {
+  return ff === "PHONE" ? "phone" : "desktop";
+}
+
+function checksForMetrics(
+  metrics: Record<string, { percentiles?: Record<string, string | number> }>,
+  ff: CruxFormFactor,
+): AuditCheck[] {
+  const tag = cohortLabel(ff);
+  const pretty = ff === "PHONE" ? "Mobile (phone)" : "Desktop";
+
+  const checks: AuditCheck[] = [
+    row(
+      `crux_${tag}_data`,
+      `Chrome UX Report — ${pretty}`,
+      "pass",
+      `${pretty} cohort: real-user experience data in the public CrUX dataset (p75 values below).`,
+    ),
+  ];
+
+  const lcp = readP75(metrics.largest_contentful_paint);
+  if (lcp != null && Number.isFinite(lcp)) {
+    const r: CheckResult =
+      lcp <= 2500 ? "pass" : lcp <= 4000 ? "warn" : "fail";
+    checks.push(
+      metricRow(
+        `crux_${tag}_lcp_p75`,
+        `CrUX LCP (p75) — ${pretty}`,
+        r,
+        joinExplanation(
+          `${pretty}: real-user LCP p75 ≈ ${Math.round(lcp)} ms (targets: ≤2.5s pass, ≤4s warn).`,
+          lcpSuggestions(r),
+        ),
+        { value: Math.round(lcp), unit: "ms" },
+      ),
+    );
+  }
+
+  const inp = readP75(metrics.interaction_to_next_paint);
+  if (inp != null && Number.isFinite(inp)) {
+    const r: CheckResult =
+      inp <= 200 ? "pass" : inp <= 500 ? "warn" : "fail";
+    checks.push(
+      metricRow(
+        `crux_${tag}_inp_p75`,
+        `CrUX INP (p75) — ${pretty}`,
+        r,
+        joinExplanation(
+          `${pretty}: real-user INP p75 ≈ ${Math.round(inp)} ms (targets: ≤200 ms pass, ≤500 ms warn).`,
+          inpSuggestions(r),
+        ),
+        { value: Math.round(inp), unit: "ms" },
+      ),
+    );
+  }
+
+  const clsVal = readP75(metrics.cumulative_layout_shift);
+  if (clsVal != null && Number.isFinite(clsVal)) {
+    const r: CheckResult =
+      clsVal <= 0.1 ? "pass" : clsVal <= 0.25 ? "warn" : "fail";
+    checks.push(
+      metricRow(
+        `crux_${tag}_cls_p75`,
+        `CrUX CLS (p75) — ${pretty}`,
+        r,
+        joinExplanation(
+          `${pretty}: real-user CLS p75 ≈ ${clsVal.toFixed(3)} (targets: ≤0.1 pass, ≤0.25 warn).`,
+          clsSuggestions(r),
+        ),
+        { value: clsVal, unit: "cls" },
+      ),
+    );
+  }
+
+  const fcp = readP75(metrics.first_contentful_paint);
+  if (fcp != null && Number.isFinite(fcp)) {
+    const r: CheckResult =
+      fcp <= 1800 ? "pass" : fcp <= 3000 ? "warn" : "fail";
+    checks.push(
+      metricRow(
+        `crux_${tag}_fcp_p75`,
+        `CrUX FCP (p75) — ${pretty}`,
+        r,
+        joinExplanation(
+          `${pretty}: real-user FCP p75 ≈ ${Math.round(fcp)} ms (rough guide: ≤1.8s pass, ≤3s warn).`,
+          fcpSuggestions(r),
+        ),
+        { value: Math.round(fcp), unit: "ms" },
+      ),
+    );
+  }
+
+  return checks;
+}
+
+async function queryCruxCohort(
+  originBase: string,
+  apiKey: string,
+  formFactor: CruxFormFactor,
+): Promise<AuditCheck[]> {
+  const url = `${CRUX_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ origin: originBase, formFactor }),
+    signal: AbortSignal.timeout(CRUX_TIMEOUT_MS),
+  });
+
+  const data = (await res.json()) as {
+    record?: {
+      metrics?: Record<string, { percentiles?: Record<string, string | number> }>;
+    };
+    error?: { message?: string; status?: string };
+  };
+
+  const tag = cohortLabel(formFactor);
+  const pretty = formFactor === "PHONE" ? "Mobile (phone)" : "Desktop";
+
+  if (!res.ok) {
+    const msg =
+      data?.error?.message ??
+      (res.status === 404
+        ? `No public CrUX ${pretty} cohort for this origin (insufficient traffic or unknown origin).`
+        : `CrUX API HTTP ${res.status} (${pretty}).`);
+    return [
+      row(
+        `crux_${tag}_api`,
+        `Chrome UX Report — ${pretty}`,
+        "warn",
+        msg,
+      ),
+    ];
+  }
+
+  if (!data.record) {
+    return [
+      row(
+        `crux_${tag}_record`,
+        `Chrome UX Report — ${pretty}`,
+        "warn",
+        `CrUX returned no ${pretty} record (traffic may be below the public dataset threshold).`,
+      ),
+    ];
+  }
+
+  const metrics = data.record.metrics;
+  if (!metrics || Object.keys(metrics).length === 0) {
+    return [
+      row(
+        `crux_${tag}_empty`,
+        `Chrome UX Report — ${pretty}`,
+        "warn",
+        `CrUX returned no ${pretty} metric histograms (often low traffic or very new site).`,
+      ),
+    ];
+  }
+
+  return checksForMetrics(metrics, formFactor);
+}
+
 /**
- * Fetch origin-level Chrome UX Report (real-user) percentiles once per audit.
- * Uses CRUX_API_KEY if set; otherwise falls back to PSI_API_KEY (same GCP project
- * key often works once the Chrome UX Report API is enabled for that project).
+ * Fetch origin-level Chrome UX Report (real-user) percentiles once per audit
+ * for **phone** and **desktop** cohorts separately.
  */
 export async function runCruxOriginChecks(originWebsiteUrl: string): Promise<AuditCheck[]> {
   const originBase = normalizeUrl(originWebsiteUrl);
@@ -135,142 +294,11 @@ export async function runCruxOriginChecks(originWebsiteUrl: string): Promise<Aud
   if (!apiKey) return [];
 
   try {
-    const url = `${CRUX_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ origin: originBase }),
-      signal: AbortSignal.timeout(CRUX_TIMEOUT_MS),
-    });
-
-    const data = (await res.json()) as {
-      record?: {
-        metrics?: Record<string, { percentiles?: Record<string, string | number> }>;
-      };
-      error?: { message?: string; status?: string };
-    };
-
-    if (!res.ok) {
-      const msg =
-        data?.error?.message ??
-        (res.status === 404
-          ? "No public CrUX dataset for this origin (insufficient traffic or unknown origin)."
-          : `CrUX API HTTP ${res.status}`);
-      return [
-        row(
-          "crux_api",
-          "Chrome UX Report (field data)",
-          "warn",
-          msg,
-        ),
-      ];
-    }
-
-    if (!data.record) {
-      return [
-        row(
-          "crux_record",
-          "Chrome UX Report (field data)",
-          "warn",
-          "CrUX returned no origin record payload (traffic may be below the public dataset threshold).",
-        ),
-      ];
-    }
-
-    const metrics = data.record.metrics;
-    if (!metrics || Object.keys(metrics).length === 0) {
-      return [
-        row(
-          "crux_data",
-          "Chrome UX Report (field data)",
-          "warn",
-          "CrUX returned no metric histograms for this origin (often low traffic or very new site).",
-        ),
-      ];
-    }
-
-    const checks: AuditCheck[] = [
-      row(
-        "crux_data",
-        "Chrome UX Report (field data)",
-        "pass",
-        "Origin has real-user experience data in the public CrUX dataset (p75 cohort below). Each Core Web Vitals row includes targets plus concrete steps to improve when the metric is not in the “good” range.",
-      ),
-    ];
-
-    const lcp = readP75(metrics.largest_contentful_paint);
-    if (lcp != null && Number.isFinite(lcp)) {
-      const r: CheckResult =
-        lcp <= 2500 ? "pass" : lcp <= 4000 ? "warn" : "fail";
-      checks.push(
-        metricRow(
-          "crux_lcp_p75",
-          "CrUX LCP (p75)",
-          r,
-          joinExplanation(
-            `Real-user LCP p75 ≈ ${Math.round(lcp)} ms (targets: ≤2.5s pass, ≤4s warn).`,
-            lcpSuggestions(r),
-          ),
-          { value: Math.round(lcp), unit: "ms" },
-        ),
-      );
-    }
-
-    const inp = readP75(metrics.interaction_to_next_paint);
-    if (inp != null && Number.isFinite(inp)) {
-      const r: CheckResult =
-        inp <= 200 ? "pass" : inp <= 500 ? "warn" : "fail";
-      checks.push(
-        metricRow(
-          "crux_inp_p75",
-          "CrUX INP (p75)",
-          r,
-          joinExplanation(
-            `Real-user INP p75 ≈ ${Math.round(inp)} ms (targets: ≤200 ms pass, ≤500 ms warn).`,
-            inpSuggestions(r),
-          ),
-          { value: Math.round(inp), unit: "ms" },
-        ),
-      );
-    }
-
-    const clsVal = readP75(metrics.cumulative_layout_shift);
-    if (clsVal != null && Number.isFinite(clsVal)) {
-      const r: CheckResult =
-        clsVal <= 0.1 ? "pass" : clsVal <= 0.25 ? "warn" : "fail";
-      checks.push(
-        metricRow(
-          "crux_cls_p75",
-          "CrUX CLS (p75)",
-          r,
-          joinExplanation(
-            `Real-user CLS p75 ≈ ${clsVal.toFixed(3)} (targets: ≤0.1 pass, ≤0.25 warn).`,
-            clsSuggestions(r),
-          ),
-          { value: clsVal, unit: "cls" },
-        ),
-      );
-    }
-
-    const fcp = readP75(metrics.first_contentful_paint);
-    if (fcp != null && Number.isFinite(fcp)) {
-      const r: CheckResult =
-        fcp <= 1800 ? "pass" : fcp <= 3000 ? "warn" : "fail";
-      checks.push(
-        metricRow(
-          "crux_fcp_p75",
-          "CrUX FCP (p75)",
-          r,
-          joinExplanation(
-            `Real-user FCP p75 ≈ ${Math.round(fcp)} ms (rough guide: ≤1.8s pass, ≤3s warn).`,
-            fcpSuggestions(r),
-          ),
-          { value: Math.round(fcp), unit: "ms" },
-        ),
-      );
-    }
-
-    return checks;
+    const [phoneChecks, desktopChecks] = await Promise.all([
+      queryCruxCohort(originBase, apiKey, "PHONE"),
+      queryCruxCohort(originBase, apiKey, "DESKTOP"),
+    ]);
+    return [...phoneChecks, ...desktopChecks];
   } catch {
     return [
       row(

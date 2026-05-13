@@ -2,6 +2,7 @@ import { Gauge } from "lucide-react";
 
 import { InspectorHeader } from "@/components/audits/InspectorHeader";
 import { LighthouseSection } from "@/components/audits/LighthouseSection";
+import { RefreshAuditPageButtons } from "@/components/audits/RefreshAuditPageButtons";
 import { PageDetailNav } from "@/components/audits/PageDetailNav";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { loadInspectorContext } from "@/lib/audit/inspector";
@@ -31,19 +32,44 @@ export default async function LighthouseInspectorPage({
           hasPsi ? (
             <span>PageSpeed Insights category scores and failing audits.</span>
           ) : (
-            <span>No PageSpeed Insights data captured for this run.</span>
+            <span>
+              No PageSpeed Insights data captured for this run. Use{" "}
+              <strong className="font-medium text-foreground">
+                Run PageSpeed again
+              </strong>{" "}
+              below, or start a new visibility scan for the whole site.
+            </span>
           )
         }
       />
 
       {hasPsi ? (
-        <LighthouseSection checks={ctx.checks} />
+        <LighthouseSection
+          checks={ctx.checks}
+          pageRefresh={{ auditId, pageId }}
+        />
       ) : (
         <EmptyState
           icon={Gauge}
           title="Lighthouse data not collected"
           description={
-            "Lighthouse data was not collected for this run. Re-run the visibility scan to populate this section."
+            <>
+              PageSpeed may have been skipped, timed out, or returned no
+              category scores. Try again for this URL only, re-analyze the full
+              page (includes AI), or run a new visibility scan for the whole
+              site.
+              <br />
+              <span className="text-xs">
+                Running PageSpeed again usually takes about 15–45 seconds.
+              </span>
+            </>
+          }
+          actions={
+            <RefreshAuditPageButtons
+              auditId={auditId}
+              pageId={pageId}
+              layout="stacked"
+            />
           }
         />
       )}

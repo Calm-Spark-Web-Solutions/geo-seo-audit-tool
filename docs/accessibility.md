@@ -54,9 +54,9 @@ Screen reader:
 
 Color & contrast:
 
-- [ ] Run Axe DevTools (or `npx @axe-core/cli`) against `/dashboard`,
+- [ ] Run Chrome DevTools **Lighthouse** (Accessibility category) or the **Accessibility** pane on `/dashboard`,
       `/communities/[id]`, `/visibility-scans/[id]`, `/visibility-scans/[id]/pages/[pageId]`,
-      `/login`, `/signup`. Target **0 serious / critical** issues.
+      `/login`, `/signup`. Target **0 serious / critical** issues (same bar as automated Lighthouse in PSI).
 - [ ] Spot-check muted captions, status badges, and ring borders in light +
       dark with Chrome DevTools contrast picker (≥4.5:1 text, ≥3:1 UI).
 

@@ -1,3 +1,6 @@
+import { after } from "next/server";
+
+import { devRunnerConsole } from "@/lib/audit/dev-runner-console";
 import { observabilityLog } from "@/lib/observability/log";
 
 /**
@@ -23,17 +26,49 @@ export function kickAuditRunnerFireAndForget(auditId: string): void {
       missingSiteUrl: !siteUrl,
       missingRunnerSecret: !runnerSecret,
     });
+    devRunnerConsole("kick skipped: missing site URL or AUDIT_RUNNER_SECRET", {
+      auditId,
+      missingSiteUrl: !siteUrl,
+      missingRunnerSecret: !runnerSecret,
+    });
     return;
   }
-  void fetch(`${siteUrl}/api/visibility-scans/${auditId}/run`, {
-    method: "POST",
-    headers: {
-      "x-audit-runner-token": runnerSecret,
-      "content-type": "application/json",
-    },
-    cache: "no-store",
-  }).catch(() => {
-    /* swallow: cron tick will reap if the kick was dropped */
+  devRunnerConsole("kick: POST runner", {
+    auditId,
+    target: `${siteUrl}/api/visibility-scans/${auditId}/run`,
+  });
+
+  // Deferred via after() so the fetch runs after the caller's response is
+  // flushed. Without this, callers that follow up with redirect() abort the
+  // request before the fetch hits the wire, so /run never receives the POST
+  // and the job sits in audit_jobs.status = "queued" forever in dev (cron
+  // recovers it in production).
+  after(async () => {
+    try {
+      const res = await fetch(`${siteUrl}/api/visibility-scans/${auditId}/run`, {
+        method: "POST",
+        headers: {
+          "x-audit-runner-token": runnerSecret,
+          "content-type": "application/json",
+        },
+        cache: "no-store",
+      });
+      devRunnerConsole("kick: POST runner response", {
+        auditId,
+        status: res.status,
+      });
+      if (!res.ok) {
+        observabilityLog.warn("runner.kick.non_2xx", {
+          auditId,
+          status: res.status,
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      devRunnerConsole("kick: POST runner failed", { auditId, error: message });
+      observabilityLog.warn("runner.kick.failed", { auditId, error: message });
+      // cron tick will reap if the kick was dropped
+    }
   });
 }
 

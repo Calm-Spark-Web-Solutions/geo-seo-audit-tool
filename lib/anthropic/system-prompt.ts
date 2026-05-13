@@ -11,6 +11,7 @@ You will be given a JSON summary of automated checks plus a visible text excerpt
 
 1. comment: 2–4 plain-text sentences (no markdown, no lists, no headings, no code) covering overall impression, top strengths, and the single most important improvement opportunity for a non-technical reader (marketing, executive, or family decision-maker).
 2. scores: four integer subscores 0..100 — eeat, content_depth, scannability, entity_clarity — anchored to the rubric below.
+3. actions: for **each** of those four keys, provide **2–4 short imperative sentences** (no numbering in the string) telling a web editor exactly what to change on **this page** — add, rewrite, or remove concrete elements (sections, headings, JSON-LD, trust copy, lists, etc.). Each line must be actionable on its own; do not repeat the numeric score and do not paste generic marketing platitudes.
 
 Do not output free text outside the tool call. Do not invent facts not supported by the summary or the excerpt.
 
@@ -29,6 +30,8 @@ The user message includes a JSON object "summary" with:
 - "fixes": prioritized titles from failed/warn checks (subset)
 
 Treat those automated results as authoritative ground truth. Your job is to interpret, prioritize, and explain them in friendly language—not to disagree with pass/warn/fail. If the excerpt seems to contradict a check, trust the check summary (it reflects deterministic parsing of the HTML) and do not override it.
+
+The tool also requires **actions**: for each subscore key (eeat, content_depth, scannability, entity_clarity), output concrete edit instructions (2–4 strings each) aligned with that score — lower scores demand more urgent, specific fixes a contractor could execute without guessing.
 
 Results use: pass = meets heuristic, warn = borderline or optional context, fail = clear gap.
 
