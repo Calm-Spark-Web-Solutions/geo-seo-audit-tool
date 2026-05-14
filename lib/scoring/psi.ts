@@ -147,6 +147,50 @@ function psiCheckFromCategory(
   );
 }
 
+function imageOptimizationChecks(audits: Record<string, PsiAudit> | undefined): AuditCheck[] {
+  if (!audits) return [];
+  const out: AuditCheck[] = [];
+
+  const imgComp = audits["uses-optimized-images"];
+  if (imgComp && imgComp.scoreDisplayMode !== "notApplicable" && imgComp.scoreDisplayMode !== "manual") {
+    const result = psiResultFromAudit(imgComp);
+    const score = imgComp.score !== null && imgComp.score !== undefined ? Math.round(imgComp.score * 100) : 50;
+    out.push(
+      auditRow(
+        "psi_image_optimization",
+        "Image compression (Lighthouse)",
+        result,
+        result === "pass"
+          ? "Images are efficiently encoded per Lighthouse audit."
+          : `Lighthouse flags unoptimized images — compress images to reduce page weight and improve LCP.${imgComp.displayValue ? ` ${imgComp.displayValue}.` : ""}`,
+        score,
+        { category: "Image optimization", pillar: "GEO" },
+      ),
+    );
+  }
+
+  // modern-image-formats supersedes uses-webp-images in newer Lighthouse versions
+  const webpAudit = audits["modern-image-formats"] ?? audits["uses-webp-images"];
+  if (webpAudit && webpAudit.scoreDisplayMode !== "notApplicable" && webpAudit.scoreDisplayMode !== "manual") {
+    const result = psiResultFromAudit(webpAudit);
+    const score = webpAudit.score !== null && webpAudit.score !== undefined ? Math.round(webpAudit.score * 100) : 50;
+    out.push(
+      auditRow(
+        "psi_webp_images",
+        "Next-gen image formats (Lighthouse)",
+        result,
+        result === "pass"
+          ? "Images are served in modern formats (WebP/AVIF) per Lighthouse."
+          : `Lighthouse recommends converting images to WebP/AVIF for better compression and LCP.${webpAudit.displayValue ? ` ${webpAudit.displayValue}.` : ""}`,
+        score,
+        { category: "Image optimization", pillar: "GEO" },
+      ),
+    );
+  }
+
+  return out;
+}
+
 function cwvChecks(audits: Record<string, PsiAudit> | undefined): AuditCheck[] {
   if (!audits) return [];
   const out: AuditCheck[] = [];
@@ -302,7 +346,11 @@ export async function runPsi(url: string): Promise<PsiBuckets> {
   const apiKey = process.env.PSI_API_KEY?.trim();
   if (!apiKey) return { seo: [], geo: [] };
 
-  const json = await fetchPsiStrategy(url, apiKey, "mobile");
+  const runDesktop = process.env.PSI_RUN_DESKTOP === "1" || process.env.PSI_DESKTOP === "true";
+  const [json, deskJson] = await Promise.all([
+    fetchPsiStrategy(url, apiKey, "mobile"),
+    runDesktop ? fetchPsiStrategy(url, apiKey, "desktop") : Promise.resolve(null),
+  ]);
   const cats = json?.lighthouseResult?.categories;
   const audits = json?.lighthouseResult?.audits;
   if (!cats) {
@@ -345,24 +393,34 @@ export async function runPsi(url: string): Promise<PsiBuckets> {
   );
   if (perfCheck) geo.push(perfCheck);
 
-  const a11yCheck = psiCheckFromCategory(
+  // Use lowercase "accessibility" so the generated explanation reads naturally,
+  // then override label and category to surface WCAG / ADA context.
+  const a11yBase = psiCheckFromCategory(
     "psi_accessibility",
-    "Lighthouse accessibility",
+    "accessibility",
     cats["accessibility"],
     audits,
-    { category: "Lighthouse categories", pillar: "GEO" },
+    { category: "Accessibility & WCAG", pillar: "GEO" },
   );
-  if (a11yCheck) geo.push(a11yCheck);
+  if (a11yBase) {
+    geo.push({
+      ...a11yBase,
+      label: "Accessibility score (WCAG / ADA)",
+      explanation:
+        a11yBase.explanation +
+        " Score ≥ 90 recommended for strong WCAG 2.1 / ADA compliance posture.",
+    });
+  }
+
+  for (const c of imageOptimizationChecks(audits)) geo.push(c);
 
   for (const c of cwvChecks(audits)) {
     if (c.key === "psi_mixed_content") seo.push(c);
     else geo.push(c);
   }
 
-  const runDesktop = process.env.PSI_RUN_DESKTOP === "1" || process.env.PSI_DESKTOP === "true";
   if (runDesktop) {
-    const desk = await fetchPsiStrategy(url, apiKey, "desktop");
-    const dCats = desk?.lighthouseResult?.categories;
+    const dCats = deskJson?.lighthouseResult?.categories;
     const perf = dCats?.["performance"];
     if (perf && perf.score != null) {
       const score = Math.round(perf.score * 100);

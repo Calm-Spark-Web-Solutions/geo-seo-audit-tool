@@ -1,52 +1,20 @@
-import * as cheerio from "cheerio";
-
 import { assertSafeUrl } from "@/lib/security/ssrf";
 import { boundedText } from "@/lib/security/bounded-fetch";
-import { normalizeUrl, sameOrigin } from "@/lib/crawler/normalize";
 import type { AuditCheck, AuditCheckEvidenceItem, CheckResult } from "@/types";
 
 import { scoreFromResult } from "./deterministic";
 
-const DEFAULT_MAX_PROBES = 18;
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_MAX_BYTES = 64 * 1024;
 
-function isSkippableHref(href: string): boolean {
-  const h = href.trim().toLowerCase();
-  return (
-    h.startsWith("#") ||
-    h.startsWith("javascript:") ||
-    h.startsWith("mailto:") ||
-    h.startsWith("tel:") ||
-    h.startsWith("data:")
-  );
-}
-
 /**
- * HEAD/GET a small set of same-origin targets discovered in HTML; flags
- * 4xx/5xx and hard errors. Bounded for cost and SSRF-safe.
+ * HEAD/GET a small set of same-origin targets pre-collected by the
+ * deterministic checker (avoids a second Cheerio parse); flags 4xx/5xx and
+ * hard errors. Bounded for cost and SSRF-safe.
  */
 export async function probeBrokenInternalLinks(
-  html: string,
-  pageUrl: string,
-  maxProbes: number = DEFAULT_MAX_PROBES,
+  targets: string[],
 ): Promise<AuditCheck> {
-  const $ = cheerio.load(html);
-  const targets: string[] = [];
-  const seen = new Set<string>();
-
-  $("a[href]").each((_, el) => {
-    if (targets.length >= maxProbes) return false;
-    const href = $(el).attr("href");
-    if (!href || isSkippableHref(href)) return;
-    const abs = normalizeUrl(href, pageUrl);
-    if (!abs || !sameOrigin(pageUrl, abs)) return;
-    if (seen.has(abs)) return;
-    seen.add(abs);
-    targets.push(abs);
-    return undefined;
-  });
-
   if (targets.length === 0) {
     return {
       key: "internal_link_health",
@@ -60,20 +28,20 @@ export async function probeBrokenInternalLinks(
     };
   }
 
-  const broken: { url: string; status: number; note?: string }[] = [];
-  const errors: { url: string; note: string }[] = [];
+  type ProbeOutcome =
+    | { kind: "broken"; url: string; status: number }
+    | { kind: "error"; url: string; note: string }
+    | { kind: "ok" };
 
-  for (const target of targets) {
+  async function probeOne(target: string): Promise<ProbeOutcome> {
     try {
       await assertSafeUrl(target);
     } catch {
-      errors.push({ url: target, note: "blocked (safety check)" });
-      continue;
+      return { kind: "error", url: target, note: "blocked (safety check)" };
     }
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
-    let status = 0;
     try {
       let res = await fetch(target, {
         method: "HEAD",
@@ -81,13 +49,9 @@ export async function probeBrokenInternalLinks(
         signal: ctrl.signal,
         headers: { Accept: "text/html,*/*" },
       });
-      status = res.status;
+      let status = res.status;
       if (status === 405 || status === 501) {
-        try {
-          await res.arrayBuffer();
-        } catch {
-          /* ignore */
-        }
+        try { await res.arrayBuffer(); } catch { /* ignore */ }
         res = await fetch(target, {
           method: "GET",
           redirect: "follow",
@@ -97,24 +61,25 @@ export async function probeBrokenInternalLinks(
         status = res.status;
         await boundedText(res, PROBE_MAX_BYTES);
       } else if (status >= 200 && status < 400) {
-        try {
-          await res.arrayBuffer();
-        } catch {
-          /* ignore */
-        }
+        try { await res.arrayBuffer(); } catch { /* ignore */ }
       }
+      return status >= 400
+        ? { kind: "broken", url: target, status }
+        : { kind: "ok" };
     } catch (e) {
-      errors.push({
-        url: target,
-        note: e instanceof Error ? e.message : "request failed",
-      });
+      return { kind: "error", url: target, note: e instanceof Error ? e.message : "request failed" };
     } finally {
       clearTimeout(timer);
     }
+  }
 
-    if (status >= 400) {
-      broken.push({ url: target, status });
-    }
+  const outcomes = await Promise.all(targets.map(probeOne));
+
+  const broken: { url: string; status: number }[] = [];
+  const errors: { url: string; note: string }[] = [];
+  for (const o of outcomes) {
+    if (o.kind === "broken") broken.push({ url: o.url, status: o.status });
+    else if (o.kind === "error") errors.push({ url: o.url, note: o.note });
   }
 
   const failN = broken.length + errors.length;

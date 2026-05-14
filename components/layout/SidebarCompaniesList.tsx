@@ -161,6 +161,8 @@ export function SidebarCompaniesList({
                 <Link
                   href={href}
                   onClick={onNavigate}
+                  title={c.name}
+                  aria-label={`${c.name}, community`}
                   className={cn(
                     "flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors",
                     active
@@ -174,7 +176,9 @@ export function SidebarCompaniesList({
                     fallback={initialsFor(c.name)}
                     size="sm"
                   />
-                  <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                  <span className="min-w-0 flex-1 text-left text-sm leading-snug break-words line-clamp-2">
+                    {c.name}
+                  </span>
                   <ChevronRight
                     className="h-4 w-4 shrink-0 opacity-40"
                     aria-hidden

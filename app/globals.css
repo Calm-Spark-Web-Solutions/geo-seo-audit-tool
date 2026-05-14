@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Class-based dark mode (next-themes sets `class="dark"` on <html>). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -26,9 +29,10 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
+  /* Slightly off-white page bg + warm muted strip (readability / Geoptie-style). */
+  --background: oklch(0.985 0.002 85);
   --foreground: oklch(0.145 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.965 0.004 85);
   /* Darkened from 0.556 to clear 4.5:1 against white and muted backgrounds. */
   --muted-foreground: oklch(0.45 0 0);
   --border: oklch(0.92 0 0);
@@ -52,33 +56,31 @@
   --chart-3: oklch(0.7 0.18 65);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --muted: oklch(0.205 0 0);
-    /* Lightened from 0.708 to keep AA contrast on dark backgrounds. */
-    --muted-foreground: oklch(0.78 0 0);
-    --border: oklch(0.27 0 0);
-    --input: oklch(0.27 0 0);
-    /* Lightened from 0.439 to give focus rings visible >=3:1 contrast. */
-    --ring: oklch(0.6 0 0);
-    --card: oklch(0.18 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.18 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.985 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.27 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --accent: oklch(0.27 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --destructive-foreground: oklch(0.985 0 0);
-    --chart-1: oklch(0.72 0.16 250);
-    --chart-2: oklch(0.78 0.18 145);
-    --chart-3: oklch(0.82 0.16 65);
-  }
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --muted: oklch(0.205 0 0);
+  /* Lightened from 0.708 to keep AA contrast on dark backgrounds. */
+  --muted-foreground: oklch(0.78 0 0);
+  --border: oklch(0.27 0 0);
+  --input: oklch(0.27 0 0);
+  /* Lightened from 0.439 to give focus rings visible >=3:1 contrast. */
+  --ring: oklch(0.6 0 0);
+  --card: oklch(0.18 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.18 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.27 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --accent: oklch(0.27 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --chart-1: oklch(0.72 0.16 250);
+  --chart-2: oklch(0.78 0.18 145);
+  --chart-3: oklch(0.82 0.16 65);
 }
 
 body {

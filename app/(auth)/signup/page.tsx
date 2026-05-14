@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { SignupForm } from "@/components/auth/SignupForm";
 import { Brand } from "@/components/layout/Brand";
+import { ThemeToggleFixed } from "@/components/theme/ThemeToggleFixed";
 import {
   Card,
   CardContent,
@@ -21,8 +22,9 @@ export default async function SignupPage({
   return (
     <main
       id="main"
-      className="flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6"
+      className="relative flex min-h-screen flex-col items-center justify-center gap-6 bg-background p-6"
     >
+      <ThemeToggleFixed />
       <Brand size="lg" />
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">

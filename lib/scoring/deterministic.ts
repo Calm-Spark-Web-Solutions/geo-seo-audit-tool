@@ -24,6 +24,8 @@ export interface DeterministicResult {
   seoChecks: AuditCheck[];
   geoChecks: AuditCheck[];
   fixes: FixItem[];
+  /** Unique same-origin URLs (up to 18) for the broken-link probe — avoids a second Cheerio parse. */
+  internalLinkTargets: string[];
 }
 
 /**
@@ -109,6 +111,7 @@ const KNOWN_SCHEMA_TYPES = new Set([
   "Person",
   "Place",
   "Service",
+  "ProfessionalService",
   "ItemList",
   "Recipe",
   "VideoObject",
@@ -880,17 +883,30 @@ export function runDeterministicChecks(
         ? `${ldParseFailures} of ${totalLdBlocks} JSON-LD block(s) failed JSON parse — fix malformed scripts.`
         : "All JSON-LD blocks parse as valid JSON.";
 
+  // Count ALL same-origin links for the score, but only surface links found
+  // outside <nav>, <header>, and <footer> in the inspector evidence — nav and
+  // footer links dominate every page and obscure the content-level link picture.
+  const MAX_PROBE_TARGETS = 18;
   let internalLinks = 0;
+  let contentLinks = 0;
   const seenHrefs = new Set<string>();
+  const seenContentHrefs = new Set<string>();
   const linkItems: AuditCheckEvidenceItem[] = [];
+  const internalLinkTargets: string[] = [];
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href");
     if (!href) return;
     const abs = normalizeUrl(href, pageUrl);
-    if (abs && sameOrigin(pageUrl, abs)) {
-      internalLinks += 1;
-      if (!seenHrefs.has(abs) && linkItems.length < cap) {
-        seenHrefs.add(abs);
+    if (!abs || !sameOrigin(pageUrl, abs)) return;
+    internalLinks += 1;
+    if (internalLinkTargets.length < MAX_PROBE_TARGETS && !seenContentHrefs.has(abs) && !seenHrefs.has(abs)) {
+      internalLinkTargets.push(abs);
+    }
+    const inChrome = $(el).closest("nav, header, footer").length > 0;
+    if (!inChrome) {
+      contentLinks += 1;
+      if (!seenContentHrefs.has(abs) && linkItems.length < cap) {
+        seenContentHrefs.add(abs);
         const anchor = $(el).text().replace(/\s+/g, " ").trim();
         const rel = $(el).attr("rel")?.trim();
         linkItems.push({
@@ -900,14 +916,22 @@ export function runDeterministicChecks(
           ...(rel ? { rel } : {}),
         });
       }
+    } else if (!seenHrefs.has(abs)) {
+      seenHrefs.add(abs);
     }
   });
   const linkResult: CheckResult =
     internalLinks >= 5 ? "pass" : internalLinks >= 2 ? "warn" : "fail";
-  const linkExplanation = `Found ${internalLinks} internal link(s) to the same site. Aim for at least 5 for strong internal linking.`;
+  const navOnlyNote =
+    contentLinks === 0 && internalLinks > 0
+      ? " All links are in navigation/header/footer; consider adding in-body links to related pages."
+      : "";
+  const linkExplanation =
+    `Found ${internalLinks} internal link(s) (${contentLinks} in body content, ${internalLinks - contentLinks} in nav/header/footer). Aim for at least 5 body-content links for strong internal linking.` +
+    navOnlyNote;
   const linkEvidence: AuditCheckEvidence | undefined =
     linkItems.length > 0
-      ? { totalCount: internalLinks, items: linkItems, inspector: "links" }
+      ? { totalCount: contentLinks, items: linkItems, inspector: "links" }
       : undefined;
 
   // ---------- structured data (granular) ----------
@@ -1128,6 +1152,128 @@ export function runDeterministicChecks(
     captionExplanation = "Images present but no <figcaption>; captions help AI summaries cite images.";
   }
 
+  // ---------- outbound authority links ----------
+
+  const AUTHORITY_SIGNALS = [".gov", ".edu", "schema.org", "google.com", "nih.gov", "cdc.gov", "aarp.org"];
+  let externalLinkCount = 0;
+  let authorityLinkCount = 0;
+  const externalLinkItems: AuditCheckEvidenceItem[] = [];
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href");
+    if (!href) return;
+    const abs = normalizeUrl(href, pageUrl);
+    if (!abs || sameOrigin(pageUrl, abs)) return;
+    externalLinkCount += 1;
+    const isAuthority = AUTHORITY_SIGNALS.some((sig) => abs.includes(sig));
+    if (isAuthority) authorityLinkCount += 1;
+    if (externalLinkItems.length < 25) {
+      const anchor = $(el).text().replace(/\s+/g, " ").trim();
+      externalLinkItems.push({
+        type: "link",
+        url: snippetForUi(abs, 200),
+        anchor: anchor ? snippetForUi(anchor, 80) : undefined,
+      });
+    }
+  });
+  const outboundResult: CheckResult =
+    externalLinkCount === 0
+      ? "fail"
+      : authorityLinkCount > 0
+        ? "pass"
+        : "warn";
+  const outboundExplanation =
+    externalLinkCount === 0
+      ? "No external outbound links found; linking to authoritative sources signals trust to AI crawlers."
+      : authorityLinkCount > 0
+        ? `Found ${authorityLinkCount} outbound link(s) to authoritative domains (.gov/.edu or known authority sites) out of ${externalLinkCount} external link(s).`
+        : `Found ${externalLinkCount} external link(s) but none to authority domains (.gov, .edu, schema.org, etc.); consider citing authoritative sources.`;
+  const outboundEvidence: AuditCheckEvidence | undefined =
+    externalLinkItems.length > 0
+      ? { totalCount: externalLinkCount, items: externalLinkItems }
+      : undefined;
+
+  // ---------- semantic HTML elements ----------
+
+  const semanticTagCounts: Record<string, number> = {
+    nav: $("nav").length,
+    main: $("main").length,
+    article: $("article").length,
+    section: $("section").length,
+    aside: $("aside").length,
+    header: $("header").length,
+    footer: $("footer").length,
+  };
+  const semanticTagsPresent = Object.values(semanticTagCounts).filter((v) => v > 0).length;
+  const semanticHtmlResult: CheckResult =
+    semanticTagsPresent >= 4 ? "pass" : semanticTagsPresent >= 2 ? "warn" : "fail";
+  const semanticHtmlExplanation =
+    semanticTagsPresent >= 4
+      ? `${semanticTagsPresent} of 7 semantic HTML5 element types present; strong structural signal for AI parsers.`
+      : semanticTagsPresent >= 2
+        ? `Only ${semanticTagsPresent} of 7 semantic HTML5 element types present (nav, main, article, section, aside, header, footer); add more for richer AI-parseable structure.`
+        : `${semanticTagsPresent} semantic HTML5 element type(s) found; pages with minimal semantic structure are harder for AI crawlers to interpret.`;
+  const semanticHtmlEvidence: AuditCheckEvidence = {
+    totalCount: semanticTagsPresent,
+    items: Object.entries(semanticTagCounts)
+      .filter(([, v]) => v > 0)
+      .map(([tag, count]) => ({ type: "kv" as const, label: `<${tag}>`, value: String(count) })),
+  };
+
+  // ---------- acronym <abbr> usage ----------
+
+  const abbrCount = $("abbr").length;
+  const abbrResult: CheckResult = abbrCount > 0 ? "pass" : "warn";
+  const abbrExplanation =
+    abbrCount > 0
+      ? `Found ${abbrCount} <abbr> element(s); defined acronyms help AI crawlers parse technical terms correctly.`
+      : "No <abbr> elements found; defining acronyms with <abbr title> improves AI understanding of specialized terminology.";
+  const abbrEvidence: AuditCheckEvidence | undefined =
+    abbrCount > 0
+      ? { items: [{ type: "kv", label: "<abbr> count", value: String(abbrCount) }] }
+      : undefined;
+
+  // ---------- summary / takeaways block ----------
+
+  const summaryClassPattern = /\b(summary|takeaway|key[-_]point|tldr|quick[-_]fact|highlights?)\b/i;
+  const summaryByClass = $("[class]").filter((_, el) => {
+    const cls = $(el).attr("class") ?? "";
+    return summaryClassPattern.test(cls);
+  }).length > 0;
+  const summaryByAside = $("aside").filter((_, el) => {
+    return $(el).find("ul, ol").length > 0;
+  }).length > 0;
+  const hasSummaryBlock = summaryByClass || summaryByAside;
+  const summaryResult: CheckResult = hasSummaryBlock ? "pass" : "warn";
+  const summaryExplanation = hasSummaryBlock
+    ? "Summary or key-takeaways block detected; great for AI snippet extraction and reader scannability."
+    : "No obvious summary or key-takeaways block found; adding a brief bullet-point summary near the top helps AI models extract the page's core message.";
+
+  // ---------- schema: AboutPage ----------
+
+  const hasAboutPage = schemaTypes.has("AboutPage");
+  const aboutPageCheck = check(
+    "schema_about_page",
+    "Schema: AboutPage",
+    hasAboutPage ? "pass" : "warn",
+    hasAboutPage
+      ? "AboutPage schema present; clearly defines the page as an entity description."
+      : "No AboutPage schema; add on the /about page to signal brand-entity information to AI crawlers.",
+    { category: "Structured data", pillar: "GEO", evidence: schemaEvidence },
+  );
+
+  // ---------- schema: ProfessionalService ----------
+
+  const hasProfService = schemaTypes.has("ProfessionalService");
+  const profServiceCheck = check(
+    "schema_professional_service",
+    "Schema: ProfessionalService",
+    hasProfService ? "pass" : "warn",
+    hasProfService
+      ? "ProfessionalService schema present; positions the business as a B2B service provider."
+      : "No ProfessionalService schema; add on service pages to signal the agency as a professional B2B provider.",
+    { category: "Structured data", pillar: "GEO", evidence: schemaEvidence },
+  );
+
   let pathLower = "";
   try {
     pathLower = new URL(pageUrl).pathname.toLowerCase();
@@ -1182,11 +1328,39 @@ export function runDeterministicChecks(
       structExplanation,
       { category: "Content readiness", pillar: "GEO" },
     ),
+    check(
+      "semantic_html_elements",
+      "Semantic HTML5 elements",
+      semanticHtmlResult,
+      semanticHtmlExplanation,
+      { category: "Content readiness", pillar: "GEO", evidence: semanticHtmlEvidence },
+    ),
     check("faq_heading", "FAQ-style heading", faqResult, faqExplanation, {
       category: "Content readiness",
       pillar: "GEO",
       evidence: faqEvidence,
     }),
+    check(
+      "summary_block",
+      "Summary / key-takeaways block",
+      summaryResult,
+      summaryExplanation,
+      { category: "Content readiness", pillar: "GEO" },
+    ),
+    check(
+      "acronym_abbr_usage",
+      "Acronym definitions (<abbr>)",
+      abbrResult,
+      abbrExplanation,
+      { category: "Content readiness", pillar: "GEO", evidence: abbrEvidence },
+    ),
+    check(
+      "outbound_authority_links",
+      "Outbound authority links",
+      outboundResult,
+      outboundExplanation,
+      { category: "Content readiness", pillar: "GEO", evidence: outboundEvidence },
+    ),
     check("json_ld", "Structured data (JSON-LD)", jsonLdResult, jsonLdExplanation, {
       category: "Structured data",
       pillar: "GEO",
@@ -1214,6 +1388,8 @@ export function runDeterministicChecks(
     svcFaqCheck,
     articleCheck,
     itemListCheck,
+    aboutPageCheck,
+    profServiceCheck,
     napCheck,
     ...offlineSchemaChecks,
     check("internal_links", "Internal links", linkResult, linkExplanation, {
@@ -1249,7 +1425,47 @@ export function runDeterministicChecks(
     }),
   ];
 
+  // ---------- crawl budget URL heuristic ----------
+
+  const CRAWL_WASTE_PATTERNS = [
+    /[?&](tag|s|category|paged)=/i,
+    /\/page\/\d+\//i,
+    /\/(archive|tag|category)(\/|$)/i,
+    /[?&]p=\d+(?:&|$)/i,
+  ];
+  const crawlWasteMatches = CRAWL_WASTE_PATTERNS.filter((p) => p.test(pageUrl));
+  const crawlBudgetResult: CheckResult = crawlWasteMatches.length === 0 ? "pass" : "warn";
+  const crawlBudgetExplanation =
+    crawlBudgetResult === "pass"
+      ? "URL does not match common crawl-budget-waste patterns (tags, archives, pagination)."
+      : `URL matches thin/paginated content patterns (${crawlWasteMatches.length} signal(s) — e.g. /page/N/, /tag/, ?s=); consider noindex or canonical to preserve crawl budget.`;
+  seoChecks.push(
+    check("crawl_budget_url", "Crawl budget URL heuristic", crawlBudgetResult, crawlBudgetExplanation, {
+      category: "Crawlability",
+      pillar: "SEO",
+    }),
+  );
+
+  // ---------- thin page detector ----------
+
+  const veryThinAndIndexed = !hasNoindex && wordCount < 150;
+  const thinAndIndexed = !hasNoindex && wordCount < 300;
+  const thinPageResult: CheckResult = veryThinAndIndexed ? "fail" : thinAndIndexed ? "warn" : "pass";
+  const thinPageExplanation = veryThinAndIndexed
+    ? `Very low word count (~${wordCount} words) on an indexable page — thin content may be penalised or ignored by search engines. Add content or apply noindex.`
+    : thinAndIndexed
+      ? `Below-target word count (~${wordCount} words) on an indexable page. Consider expanding content or adding noindex if this URL is not meant to rank.`
+      : hasNoindex
+        ? `Page is marked noindex — thin-content depth check skipped (intentional exclusion).`
+        : `Indexable page has adequate content depth (~${wordCount} words).`;
+  seoChecks.push(
+    check("thin_page_indexed", "Thin page (indexed)", thinPageResult, thinPageExplanation, {
+      category: "Content readiness",
+      pillar: "SEO",
+    }),
+  );
+
   const fixes = [...fixesFromChecks(seoChecks), ...fixesFromChecks(geoChecks)];
 
-  return { seoChecks, geoChecks, fixes };
+  return { seoChecks, geoChecks, fixes, internalLinkTargets };
 }

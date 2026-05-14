@@ -16,6 +16,7 @@ import {
   fetchSitemap,
   fetchUrlsFromShards,
 } from "@/lib/crawler/sitemap";
+import { retryMissingPsiForAudit } from "@/lib/audit/psi-retry";
 import { recalculateAuditRollupScores } from "@/lib/audit/rollup-scores";
 import { recordRosterEntries } from "@/lib/billing/page-quota";
 import {
@@ -26,6 +27,7 @@ import { scoreAndAnalyzePage } from "@/lib/scoring";
 import { runCruxOriginChecks } from "@/lib/scoring/crux";
 import { detectLikelyPasswordGate } from "@/lib/scoring/password-gate";
 import { buildCrawlGraphChecks } from "@/lib/scoring/crawl-graph";
+import { buildNearDuplicateChecks } from "@/lib/scoring/near-duplicate";
 import { runSiteWideChecks } from "@/lib/scoring/site-wide";
 
 /**
@@ -36,7 +38,7 @@ import { runSiteWideChecks } from "@/lib/scoring/site-wide";
 const LEGACY_MAX_PAGES = 10;
 const HARD_PAGE_CEILING = 1000;
 const FETCH_TIMEOUT_MS = 8000;
-const FETCH_BATCH_SIZE = 5;
+const FETCH_BATCH_SIZE = 10;
 const SCORE_CONCURRENCY = 3;
 const ENGINE_VERSION = 4;
 
@@ -319,7 +321,7 @@ export async function runAudit({
         score: null,
         seo_score: null,
         geo_score: null,
-        near_duplicate_checks: [],
+        near_duplicate_checks: [],   // no pages fetched yet
       })
       .eq("id", auditId);
     return;
@@ -331,9 +333,10 @@ export async function runAudit({
 
   const crawlGraphChecks = buildCrawlGraphChecks(work, base);
   siteWideChecks = [...siteWideChecks, ...crawlGraphChecks];
+  const nearDuplicateChecks = buildNearDuplicateChecks(work);
   await supabase
     .from("audits")
-    .update({ site_wide_checks: siteWideChecks })
+    .update({ site_wide_checks: siteWideChecks, near_duplicate_checks: nearDuplicateChecks })
     .eq("id", auditId);
 
   let pagesCrawled = 0;
@@ -358,78 +361,88 @@ export async function runAudit({
 
     const batch = work.slice(i, i + SCORE_CONCURRENCY);
     const scored = await Promise.all(
-      batch.map(async ({ url, html, meta }) => {
-        const result = await scoreAndAnalyzePage({ url, html, fetchMeta: meta });
+      batch.map(async ({ url, html, meta }, batchIndex) => {
+        // Stagger PSI calls within the batch by 1.5 s per position to reduce
+        // simultaneous requests and ease Google rate-limit pressure.
+        const result = await scoreAndAnalyzePage({
+          url,
+          html,
+          fetchMeta: meta,
+          psiStaggerMs: batchIndex * 1500,
+        });
         return { url, html, ...result };
       }),
     );
 
-    // Persist sequentially so pages_crawled increments monotonically and
-    // the live UI never moves backwards.
-    for (const s of scored) {
-      const excludePage = detectLikelyPasswordGate(s.html);
-      const effectiveScore =
-        overallPageScoreFromChecks(s.seoChecks, s.geoChecks) ?? s.score;
-      const insertOne = await supabase
-        .from("audit_pages")
-        .insert({
-          audit_id: auditId,
-          url: s.url,
-          score: effectiveScore,
-          seo_results: s.seoChecks,
-          geo_results: s.geoChecks,
-          fixes: s.fixes,
-          ai_comment: s.aiComment,
-          exclude_from_audit_score: excludePage,
-          sitemap_category_label: categoryByUrl.get(s.url) ?? null,
-        })
-        .select("id")
-        .single();
-      if (insertOne.error || !insertOne.data) {
-        throw new Error(
-          insertOne.error?.message ?? "Failed to insert audit page",
-        );
-      }
-      pagesCrawled += 1;
+    // Persist all pages in this batch in parallel, then accumulate scores.
+    // pages_crawled is still updated once per batch (below) so the live UI
+    // counter moves forward monotonically — parallelising inserts within a
+    // batch does not affect that invariant.
+    type PersistResult = {
+      excludePage: boolean;
+      seoChecks: typeof scored[0]["seoChecks"];
+      geoChecks: typeof scored[0]["geoChecks"];
+    };
 
-      // Page-roster billing: persist this URL the first time we successfully
-      // score it for the community. Idempotent (unique on community_id+url)
-      // so re-runs and concurrent audits never double-count.
-      if (communityId) {
-        try {
-          await recordRosterEntries(supabase, {
-            communityId,
-            auditId,
-            urls: [s.url],
-          });
-        } catch (err) {
-          observabilityLog.warn("audit.roster_persist_failed", {
-            auditId,
-            communityId,
+    const persistResults = await Promise.all(
+      scored.map(async (s): Promise<PersistResult> => {
+        const excludePage = detectLikelyPasswordGate(s.html);
+        const effectiveScore =
+          overallPageScoreFromChecks(s.seoChecks, s.geoChecks) ?? s.score;
+        const insertOne = await supabase
+          .from("audit_pages")
+          .insert({
+            audit_id: auditId,
             url: s.url,
-            error: err instanceof Error ? err.message : String(err),
-          });
+            score: effectiveScore,
+            seo_results: s.seoChecks,
+            geo_results: s.geoChecks,
+            fixes: s.fixes,
+            ai_comment: s.aiComment,
+            exclude_from_audit_score: excludePage,
+            sitemap_category_label: categoryByUrl.get(s.url) ?? null,
+          })
+          .select("id")
+          .single();
+        if (insertOne.error || !insertOne.data) {
+          throw new Error(
+            insertOne.error?.message ?? "Failed to insert audit page",
+          );
         }
-      }
 
-      // Same accumulation rules as recalculateAuditRollupScores so the
-      // running aggregate matches the canonical pass at end of run.
+        // Page-roster billing: idempotent (unique on community_id+url) so
+        // parallel calls for different URLs in the same batch are safe.
+        if (communityId) {
+          try {
+            await recordRosterEntries(supabase, {
+              communityId,
+              auditId,
+              urls: [s.url],
+            });
+          } catch (err) {
+            observabilityLog.warn("audit.roster_persist_failed", {
+              auditId,
+              communityId,
+              url: s.url,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        return { excludePage, seoChecks: s.seoChecks, geoChecks: s.geoChecks };
+      }),
+    );
+
+    // Accumulate rolling averages from the batch results.
+    for (const { excludePage, seoChecks, geoChecks } of persistResults) {
+      pagesCrawled += 1;
       if (!excludePage) {
-        const seo = categoryScoreEffective(s.seoChecks);
-        const geo = categoryScoreEffective(s.geoChecks);
-        const total = overallPageScoreFromChecks(s.seoChecks, s.geoChecks);
-        if (seo != null) {
-          seoSum += seo;
-          seoN += 1;
-        }
-        if (geo != null) {
-          geoSum += geo;
-          geoN += 1;
-        }
-        if (total != null) {
-          totalSum += total;
-          totalN += 1;
-        }
+        const seo = categoryScoreEffective(seoChecks);
+        const geo = categoryScoreEffective(geoChecks);
+        const total = overallPageScoreFromChecks(seoChecks, geoChecks);
+        if (seo != null) { seoSum += seo; seoN += 1; }
+        if (geo != null) { geoSum += geo; geoN += 1; }
+        if (total != null) { totalSum += total; totalN += 1; }
       }
     }
 
@@ -461,7 +474,7 @@ export async function runAudit({
       status: "complete",
       pages_crawled: pagesCrawled,
       progress_total: finalProgressTotal,
-      near_duplicate_checks: [],
+      near_duplicate_checks: nearDuplicateChecks,
     })
     .eq("id", auditId);
 
@@ -474,6 +487,28 @@ export async function runAudit({
     pagesCrawled,
     durationMs: Date.now() - t0,
   });
+
+  // Best-effort Lighthouse top-up: PSI can flake during the main pass
+  // (timeouts, 429/503), and we'd rather quietly retry now while the
+  // runner still holds the lease than make the user click the per-page
+  // button. Capped + spaced inside `retryMissingPsiForAudit`. Errors here
+  // never propagate — the audit is already `status = complete`, and the
+  // manual button + bulk endpoint remain the recourse for anything that
+  // still fails after this pass.
+  try {
+    const psiTop = await retryMissingPsiForAudit(supabase, auditId);
+    if (psiTop.attempted > 0) {
+      observabilityLog.info("audit.run.psi_topup", {
+        auditId,
+        ...psiTop,
+      });
+    }
+  } catch (err) {
+    observabilityLog.warn("audit.run.psi_topup_threw", {
+      auditId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**

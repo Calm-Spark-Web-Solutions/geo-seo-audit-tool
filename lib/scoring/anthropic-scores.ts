@@ -22,6 +22,14 @@ const ANTHROPIC_TIMEOUT_MS = 30_000;
 /** Haiku fast path; synced with Anthropic-supported IDs (see release notes). */
 const DEFAULT_MODEL = "claude-haiku-4-5";
 
+// Lazy-initialized module-level client so we pay the constructor cost once
+// across all pages in a run rather than once per page.
+let _anthropicClient: Anthropic | null = null;
+function getAnthropicClient(apiKey: string): Anthropic {
+  if (!_anthropicClient) _anthropicClient = new Anthropic({ apiKey });
+  return _anthropicClient;
+}
+
 const ACTION_LINE_SCHEMA = {
   type: "array" as const,
   items: { type: "string" as const, maxLength: 280 },
@@ -260,7 +268,7 @@ export async function generatePageAnalysis(
   };
 
   const model = process.env.ANTHROPIC_AUDIT_MODEL?.trim() || DEFAULT_MODEL;
-  const client = new Anthropic({ apiKey });
+  const client = getAnthropicClient(apiKey);
 
   const userPayload = buildAnthropicUserPayload({
     url: input.url,

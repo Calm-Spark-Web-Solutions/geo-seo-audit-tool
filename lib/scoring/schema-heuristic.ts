@@ -146,6 +146,29 @@ export function structuredDataOfflineHeuristics(
     );
   }
 
+  let serviceMissingFields = 0;
+  for (const block of parsedBlocks) {
+    visitObjects(block, (o) => {
+      const ts = typesOf(o);
+      for (const t of ts) {
+        if (t === "Service" || t === "ProfessionalService") {
+          if (!o.serviceType || !o.provider || !o.areaServed) serviceMissingFields += 1;
+        }
+      }
+    });
+  }
+
+  if (serviceMissingFields > 0) {
+    out.push(
+      item(
+        "schema_service_fields_offline",
+        "Service schema fields (offline)",
+        "warn",
+        `${serviceMissingFields} Service/ProfessionalService node(s) missing recommended fields — add serviceType, provider, and areaServed for richer structured data.`,
+      ),
+    );
+  }
+
   let reviewMalformed = 0;
   let aggregateMalformed = 0;
   let reviewWellformed = 0;

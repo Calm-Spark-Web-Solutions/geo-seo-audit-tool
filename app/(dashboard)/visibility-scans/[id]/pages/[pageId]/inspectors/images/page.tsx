@@ -1,4 +1,4 @@
-import { Image as ImageIcon } from "lucide-react";
+import { CheckCircle2, Image as ImageIcon } from "lucide-react";
 
 import { InspectorHeader } from "@/components/audits/InspectorHeader";
 import { PageDetailNav } from "@/components/audits/PageDetailNav";
@@ -15,6 +15,36 @@ import type { AuditCheckEvidenceItem } from "@/types";
 
 export const dynamic = "force-dynamic";
 
+function severityConfig(missing: number): {
+  label: string;
+  sublabel: string;
+  card: string;
+  count: string;
+} {
+  if (missing === 0) {
+    return {
+      label: "All images have alt text",
+      sublabel: "No accessibility issues detected",
+      card: "border-emerald-500/30 bg-emerald-500/10",
+      count: "text-emerald-700 dark:text-emerald-400",
+    };
+  }
+  if (missing <= 3) {
+    return {
+      label: `${missing} image${missing === 1 ? "" : "s"} missing alt text`,
+      sublabel: "Minor — fix these for better accessibility and AI parsing",
+      card: "border-amber-500/30 bg-amber-500/10",
+      count: "text-amber-700 dark:text-amber-400",
+    };
+  }
+  return {
+    label: `${missing} images missing alt text`,
+    sublabel: "High impact — missing alt text hurts AI content parsing and screen readers",
+    card: "border-destructive/30 bg-destructive/10",
+    count: "text-destructive",
+  };
+}
+
 export default async function ImagesInspectorPage({
   params,
 }: {
@@ -30,6 +60,7 @@ export default async function ImagesInspectorPage({
         i.type === "image",
     ) ?? [];
   const totalMissing = match?.evidence.totalCount ?? items.length;
+  const sev = severityConfig(totalMissing);
 
   return (
     <>
@@ -49,6 +80,21 @@ export default async function ImagesInspectorPage({
           </span>
         }
       />
+
+      {/* Severity stat card */}
+      <div className={`flex items-center gap-4 rounded-lg border px-5 py-4 ${sev.card}`}>
+        {totalMissing === 0 ? (
+          <CheckCircle2 className="h-8 w-8 shrink-0 text-emerald-600 dark:text-emerald-500" aria-hidden />
+        ) : (
+          <span className={`text-4xl font-bold tabular-nums leading-none ${sev.count}`}>
+            {totalMissing}
+          </span>
+        )}
+        <div className="min-w-0">
+          <p className={`font-semibold ${sev.count}`}>{sev.label}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{sev.sublabel}</p>
+        </div>
+      </div>
 
       {items.length === 0 ? (
         <EmptyState

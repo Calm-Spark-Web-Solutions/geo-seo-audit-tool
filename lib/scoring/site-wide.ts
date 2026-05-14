@@ -228,6 +228,32 @@ export async function runSiteWideChecks(originWebsiteUrl: string): Promise<Audit
     ),
   );
 
+  const IMPORTANT_PATHS = ["/services", "/about", "/contact", "/blog", "/products", "/pricing"];
+  const disallowedServicePaths: string[] = [];
+  if (body.length > 0) {
+    for (const block of parseRobotsBlocks(body)) {
+      if (!blockAppliesToAgent(block.agents, "*")) continue;
+      for (const rule of block.rules) {
+        const m = /^Disallow:\s*(.+)$/i.exec(rule.trim());
+        if (!m) continue;
+        const path = m[1].trim();
+        if (IMPORTANT_PATHS.some((ip) => path.startsWith(ip))) {
+          disallowedServicePaths.push(path);
+        }
+      }
+    }
+  }
+  checks.push(
+    auditCheck(
+      "sitewide_service_path_disallow",
+      "Service path disallow rules",
+      disallowedServicePaths.length === 0 ? "pass" : "warn",
+      disallowedServicePaths.length === 0
+        ? "No Disallow rules targeting important content paths (/services, /about, /contact, etc.) detected."
+        : `Wildcard Disallow rules cover important content paths: ${disallowedServicePaths.slice(0, 5).join(", ")}. Verify these pages should be blocked from crawlers.`,
+    ),
+  );
+
   const declared = body.length > 0 ? extractSitemapUrls(body) : [];
   const candidates =
     declared.length > 0

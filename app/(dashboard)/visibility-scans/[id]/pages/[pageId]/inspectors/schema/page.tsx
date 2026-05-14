@@ -1,4 +1,4 @@
-import { Tag } from "lucide-react";
+import { CheckCircle2, Tag, XCircle } from "lucide-react";
 
 import { InspectorHeader } from "@/components/audits/InspectorHeader";
 import { PageDetailNav } from "@/components/audits/PageDetailNav";
@@ -14,6 +14,51 @@ import { findInspectorEvidence, loadInspectorContext } from "@/lib/audit/inspect
 import type { AuditCheck, AuditCheckEvidenceItem } from "@/types";
 
 export const dynamic = "force-dynamic";
+
+// Schema types by importance tier for local service / senior-care niche
+const TIER_HIGH = new Set([
+  "LocalBusiness", "Organization", "Service", "ProfessionalService",
+  "MedicalBusiness", "LodgingBusiness", "HomeAndConstructionBusiness",
+]);
+const TIER_CONTENT = new Set([
+  "FAQPage", "QAPage", "HowTo", "Article", "BlogPosting", "NewsArticle",
+  "Event", "Review", "AggregateRating",
+]);
+const TIER_STRUCTURE = new Set([
+  "WebSite", "WebPage", "AboutPage", "ContactPage",
+  "BreadcrumbList", "SiteLinksSearchBox", "ItemList",
+]);
+
+const CHIP_CLASSES: Record<"high" | "content" | "structure" | "other", string> = {
+  high:      "border-emerald-500/50 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
+  content:   "border-blue-500/40 bg-blue-500/10 text-blue-800 dark:text-blue-300",
+  structure: "border-violet-500/40 bg-violet-500/10 text-violet-800 dark:text-violet-300",
+  other:     "border-border bg-muted/30 text-foreground",
+};
+
+const LEGEND = [
+  { tier: "high" as const,      label: "High value",           desc: "Business identity & service signals" },
+  { tier: "content" as const,   label: "Content enrichment",   desc: "FAQs, articles, reviews" },
+  { tier: "structure" as const, label: "Structure",            desc: "Site navigation & page types" },
+  { tier: "other" as const,     label: "Other",                desc: "All other detected types" },
+];
+
+// Types AI assistants and local-SEO rankings reward most
+const KEY_NICHE_TYPES: { type: string; label: string }[] = [
+  { type: "LocalBusiness",       label: "LocalBusiness" },
+  { type: "Organization",        label: "Organization" },
+  { type: "Service",             label: "Service / ProfessionalService" },
+  { type: "FAQPage",             label: "FAQPage" },
+  { type: "BreadcrumbList",      label: "BreadcrumbList" },
+  { type: "AggregateRating",     label: "AggregateRating (reviews)" },
+];
+
+function tierOf(t: string): "high" | "content" | "structure" | "other" {
+  if (TIER_HIGH.has(t)) return "high";
+  if (TIER_CONTENT.has(t)) return "content";
+  if (TIER_STRUCTURE.has(t)) return "structure";
+  return "other";
+}
 
 const PREFERRED_SCHEMA_KEYS = [
   "structured_data_coverage",
@@ -47,6 +92,10 @@ export default async function SchemaInspectorPage({
     ) ?? [];
   const totalTypes = match?.evidence.totalCount ?? schemaItems.length;
   const related = relatedSchemaChecks(ctx.checks);
+  const detectedTypeSet = new Set(schemaItems.map((s) => s.schemaType));
+
+  // Check Service/ProfessionalService as a combined key
+  const hasService = detectedTypeSet.has("Service") || detectedTypeSet.has("ProfessionalService");
 
   return (
     <>
@@ -71,29 +120,98 @@ export default async function SchemaInspectorPage({
           description="JSON-LD blocks were not detected, or this audit ran before schema sampling shipped."
         />
       ) : (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Detected schema @types</CardTitle>
-            <CardDescription>
-              Each chip represents a Schema.org type the scan found in a
-              JSON-LD block on this page.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="flex flex-wrap gap-2">
-              {[...schemaItems]
-                .sort((a, b) => a.schemaType.localeCompare(b.schemaType))
-                .map((s) => (
-                  <li key={s.schemaType}>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/30 px-2.5 py-1 text-sm">
-                      <Tag className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                      <span className="font-mono">{s.schemaType}</span>
+        <>
+          {/* Detected types with color-coded tiers */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Detected schema @types</CardTitle>
+              <CardDescription>
+                Color indicates importance tier for local service and senior-care businesses.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <ul className="flex flex-wrap gap-2">
+                {[...schemaItems]
+                  .sort((a, b) => {
+                    const ta = tierOf(a.schemaType);
+                    const tb = tierOf(b.schemaType);
+                    const order = { high: 0, content: 1, structure: 2, other: 3 };
+                    if (order[ta] !== order[tb]) return order[ta] - order[tb];
+                    return a.schemaType.localeCompare(b.schemaType);
+                  })
+                  .map((s) => {
+                    const tier = tierOf(s.schemaType);
+                    return (
+                      <li key={s.schemaType}>
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm font-medium ${CHIP_CLASSES[tier]}`}
+                        >
+                          <Tag className="h-3.5 w-3.5 opacity-70" aria-hidden />
+                          <span className="font-mono">{s.schemaType}</span>
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
+
+              {/* Legend */}
+              <ul className="flex flex-wrap gap-3">
+                {LEGEND.map(({ tier, label, desc }) => (
+                  <li key={tier} className="flex items-center gap-1.5 text-xs">
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${CHIP_CLASSES[tier]}`}
+                    >
+                      {label}
                     </span>
+                    <span className="text-muted-foreground">{desc}</span>
                   </li>
                 ))}
-            </ul>
-          </CardContent>
-        </Card>
+              </ul>
+            </CardContent>
+          </Card>
+
+          {/* Key types gap analysis */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Key types for local service businesses</CardTitle>
+              <CardDescription>
+                High-impact schema types that AI assistants and local-search rankings reward most.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
+                {KEY_NICHE_TYPES.map(({ type, label }) => {
+                  const present =
+                    type === "Service"
+                      ? hasService
+                      : detectedTypeSet.has(type);
+                  return (
+                    <li
+                      key={type}
+                      className="flex items-center gap-3 px-3 py-2.5 text-sm"
+                    >
+                      {present ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-500" aria-hidden />
+                      ) : (
+                        <XCircle className="h-4 w-4 shrink-0 text-muted-foreground/50" aria-hidden />
+                      )}
+                      <span
+                        className={`font-mono font-medium ${present ? "text-foreground" : "text-muted-foreground"}`}
+                      >
+                        {label}
+                      </span>
+                      {!present && (
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          not detected
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {related.length > 0 ? (

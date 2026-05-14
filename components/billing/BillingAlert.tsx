@@ -1,14 +1,11 @@
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 
+import { BillingSuccessAlert } from "./BillingSuccessAlert";
+
 const MESSAGES: Record<
   string,
   { tone: "ok" | "warn" | "bad"; title: string; body: string }
 > = {
-  success: {
-    tone: "ok",
-    title: "Subscription updated",
-    body: "Thanks — your billing details will sync in a few seconds. Refresh if plan status still looks empty.",
-  },
   cancel: {
     tone: "warn",
     title: "Checkout canceled",
@@ -41,8 +38,22 @@ const MESSAGES: Record<
   },
 };
 
-export function BillingAlert({ code }: { code?: string }) {
-  if (!code || !(code in MESSAGES)) return null;
+export function BillingAlert({
+  code,
+  stripeSubId,
+}: {
+  code?: string;
+  /**
+   * Server-rendered `subscriptions.stripe_sub_id` for the current user.
+   * Only used by the `success` branch (which polls for webhook arrival).
+   */
+  stripeSubId?: string | null;
+}) {
+  if (!code) return null;
+  if (code === "success") {
+    return <BillingSuccessAlert stripeSubId={stripeSubId ?? null} />;
+  }
+  if (!(code in MESSAGES)) return null;
   const msg = MESSAGES[code];
   const Icon = msg.tone === "ok" ? CheckCircle2 : AlertCircle;
   const border =

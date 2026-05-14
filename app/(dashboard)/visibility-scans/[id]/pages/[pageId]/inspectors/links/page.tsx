@@ -76,19 +76,19 @@ export default async function InternalLinksInspectorPage({
             </CardHeader>
             <CardContent>
               <dl className="grid gap-2 sm:grid-cols-2">
-                <div className="rounded-md border border-border bg-card px-3 py-2">
+                <div className="rounded-md border border-border bg-card px-4 py-3">
                   <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Total internal links
                   </dt>
-                  <dd className="mt-1 text-2xl font-semibold tabular-nums">
+                  <dd className="mt-1 text-3xl font-bold tabular-nums text-foreground">
                     {totalCount}
                   </dd>
                 </div>
-                <div className="rounded-md border border-border bg-card px-3 py-2">
+                <div className="rounded-md border border-border bg-card px-4 py-3">
                   <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Unique sample
                   </dt>
-                  <dd className="mt-1 text-2xl font-semibold tabular-nums">
+                  <dd className="mt-1 text-3xl font-bold tabular-nums text-foreground">
                     {items.length}
                   </dd>
                 </div>
