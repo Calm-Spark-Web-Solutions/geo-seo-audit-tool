@@ -1,6 +1,7 @@
 import { Brand } from "@/components/layout/Brand";
 import { MobileNavSheet } from "@/components/layout/MobileNavSheet";
 import { UserMenu } from "@/components/layout/UserMenu";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import type { DashboardAccount } from "@/lib/layout/dashboard-account";
 import type { Company } from "@/types";
@@ -23,7 +24,8 @@ export function Topbar({
         </div>
       </div>
       {/* Account control lives in the desktop sidebar; keep here for small screens only. */}
-      <div className="md:hidden">
+      <div className="flex shrink-0 items-center gap-2 md:hidden">
+        <ThemeToggle />
         <UserMenu
           email={account?.email ?? null}
           fullName={account?.fullName}

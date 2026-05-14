@@ -157,7 +157,10 @@ export default async function SettingsPage({
           />
         ) : activeTab === "billing" ? (
             <>
-              <BillingAlert code={billingCode} />
+              <BillingAlert
+                code={billingCode}
+                stripeSubId={subscription?.stripe_sub_id ?? null}
+              />
 
               <Card id="billing">
                 <CardHeader>

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { AuditDetailLive } from "@/components/audits/AuditDetailLive";
 import { DeleteAuditButton } from "@/components/audits/DeleteAuditButton";
 import { PdfActions } from "@/components/audits/PdfActions";
+import { PsiCoverageCard } from "@/components/audits/PsiCoverageCard";
 import { CommunityManualChecklist } from "@/components/communities/CommunityManualChecklist";
 import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -168,6 +169,10 @@ export default async function AuditReportPage({
         hasSavedPdf={Boolean(typedAudit.report_pdf_path)}
         generatedAt={typedAudit.report_generated_at}
       />
+
+      {typedAudit.status === "complete" ? (
+        <PsiCoverageCard auditId={typedAudit.id} />
+      ) : null}
 
       <AuditDetailLive
         key={typedAudit.id}

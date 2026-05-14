@@ -1,4 +1,5 @@
 import type { PageFetchMeta } from "@/lib/crawler/fetch";
+import { detectLikelyPasswordGate } from "@/lib/scoring/password-gate";
 import type { AuditCheck, FixItem } from "@/types";
 
 import { probeBrokenInternalLinks } from "./broken-internal-links";
@@ -69,12 +70,17 @@ export async function scoreAndAnalyzePage({
   url,
   html,
   fetchMeta,
+  psiStaggerMs = 0,
 }: {
   url: string;
   html: string;
   fetchMeta?: PageFetchMeta;
+  /** Delay in ms before firing the PSI call — used to stagger concurrent pages and reduce rate-limit collisions. */
+  psiStaggerMs?: number;
 }): Promise<PageScore> {
   const det = runDeterministicChecks(html, url, { fetchMeta });
+
+  const isGated = detectLikelyPasswordGate(html);
 
   // PSI, Anthropic, and internal-link probes run concurrently.
   const [psi, ai, brokenCheck]: [
@@ -82,15 +88,19 @@ export async function scoreAndAnalyzePage({
     AnthropicAnalysis,
     AuditCheck,
   ] = await Promise.all([
-    runPsi(url),
-    generatePageAnalysis({
-      url,
-      html,
-      seoChecks: det.seoChecks,
-      geoChecks: det.geoChecks,
-      fixes: det.fixes,
-    }),
-    probeBrokenInternalLinks(html, url),
+    psiStaggerMs > 0
+      ? new Promise<void>((r) => setTimeout(r, psiStaggerMs)).then(() => runPsi(url))
+      : runPsi(url),
+    isGated
+      ? Promise.resolve<AnthropicAnalysis>({ comment: null, geo: [] })
+      : generatePageAnalysis({
+          url,
+          html,
+          seoChecks: det.seoChecks,
+          geoChecks: det.geoChecks,
+          fixes: det.fixes,
+        }),
+    probeBrokenInternalLinks(det.internalLinkTargets),
   ]);
 
   const seoChecks: AuditCheck[] = [...det.seoChecks, ...psi.seo, brokenCheck];

@@ -1,17 +1,18 @@
 import {
   ArrowLeft,
-  ArrowRight,
   ExternalLink,
   Image as ImageIcon,
   Link as LinkIcon,
-  ListChecks,
   Tag,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AiCommentaryCard } from "@/components/audits/AiCommentaryCard";
 import { AuditPageRollupExclusion } from "@/components/audits/AuditPageRollupExclusion";
+import { ChecksCategoryBreakdown } from "@/components/audits/ChecksCategoryBreakdown";
+import type { CategoryStat } from "@/components/audits/ChecksCategoryBreakdown";
 import { FixesList } from "@/components/audits/FixesList";
 import { HowToReadDismissible } from "@/components/audits/HowToReadDismissible";
 import { LighthouseSection } from "@/components/audits/LighthouseSection";
@@ -59,6 +60,47 @@ function tallyChecks(checks: AuditCheck[]): {
     else fail += 1;
   }
   return { pass, warn, fail };
+}
+
+function buildCategoryStats(checks: AuditCheck[]): CategoryStat[] {
+  const map = new Map<
+    string,
+    { scoreSum: number; pass: number; warn: number; fail: number; count: number }
+  >();
+  for (const c of checks) {
+    const cat = c.category?.trim() || "General";
+    const entry = map.get(cat) ?? {
+      scoreSum: 0,
+      pass: 0,
+      warn: 0,
+      fail: 0,
+      count: 0,
+    };
+    const s =
+      typeof c.score === "number"
+        ? c.score
+        : c.result === "pass"
+          ? 100
+          : c.result === "warn"
+            ? 50
+            : 0;
+    entry.scoreSum += s;
+    entry.count += 1;
+    if (c.result === "pass") entry.pass += 1;
+    else if (c.result === "warn") entry.warn += 1;
+    else entry.fail += 1;
+    map.set(cat, entry);
+  }
+  return [...map.entries()]
+    .map(([category, e]) => ({
+      category,
+      avgScore: Math.round(e.scoreSum / e.count),
+      pass: e.pass,
+      warn: e.warn,
+      fail: e.fail,
+      total: e.count,
+    }))
+    .sort((a, b) => a.avgScore - b.avgScore); // worst first so users see priorities
 }
 
 export default async function AuditPageDetailPage({
@@ -135,9 +177,8 @@ export default async function AuditPageDetailPage({
   const geoForScore = checksCountingTowardScore(geo);
   const seoTally = tallyChecks(seoForScore);
   const geoTally = tallyChecks(geoForScore);
-  const totalIssues =
-    seoTally.warn + seoTally.fail + geoTally.warn + geoTally.fail;
-  const totalPassing = seoTally.pass + geoTally.pass;
+
+  const categoryStats = buildCategoryStats(allChecks);
 
   const auditDate = new Date(typedAudit.created_at).toLocaleString();
   const basePath = `/visibility-scans/${auditId}/pages/${pageId}`;
@@ -180,9 +221,7 @@ export default async function AuditPageDetailPage({
           href: `${basePath}/inspectors/schema`,
         }
       : null,
-  ].filter(
-    (c): c is NonNullable<typeof c> => c !== null,
-  );
+  ].filter((c): c is NonNullable<typeof c> => c !== null);
 
   const highPriorityFixes = fixes.filter((f) => f.priority === "high");
 
@@ -235,12 +274,7 @@ export default async function AuditPageDetailPage({
         }
       />
 
-      <AuditPageRollupExclusion
-        auditId={typedAudit.id}
-        pageId={typedPage.id}
-        excluded={typedPage.exclude_from_audit_score ?? false}
-      />
-
+      {/* Score hero — visual-first summary */}
       <PageDetailStatBar
         score={typedPage.score}
         excluded={typedPage.exclude_from_audit_score ?? false}
@@ -252,11 +286,24 @@ export default async function AuditPageDetailPage({
 
       <HowToReadDismissible />
 
+      {/* What changed vs the previous scan */}
       <PageDiff
         current={{ seo_results: seo, geo_results: geo }}
         prior={prior}
       />
 
+      {/* AI-generated page analysis */}
+      {typedPage.ai_comment ? (
+        <AiCommentaryCard comment={typedPage.ai_comment} />
+      ) : null}
+
+      {/* Category breakdown — replaces the old pillar summary */}
+      <ChecksCategoryBreakdown
+        categories={categoryStats}
+        checksHref={`${basePath}/checks`}
+      />
+
+      {/* Top priority fixes */}
       {fixes.length > 0 ? (
         <Card>
           <CardHeader className="flex flex-row items-start justify-between gap-3 pb-3">
@@ -276,14 +323,11 @@ export default async function AuditPageDetailPage({
               className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-foreground underline-offset-4 hover:underline"
             >
               View all
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
             </Link>
           </CardHeader>
           <CardContent>
             <FixesList
-              fixes={
-                highPriorityFixes.length > 0 ? highPriorityFixes : fixes
-              }
+              fixes={highPriorityFixes.length > 0 ? highPriorityFixes : fixes}
               limit={3}
             />
           </CardContent>
@@ -297,46 +341,7 @@ export default async function AuditPageDetailPage({
         pageRefresh={{ auditId, pageId }}
       />
 
-      {allChecks.length > 0 ? (
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-3 pb-3">
-            <div className="min-w-0 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ListChecks
-                  className="h-4 w-4 text-muted-foreground"
-                  aria-hidden
-                />
-                Checks
-              </CardTitle>
-              <CardDescription>
-                {totalIssues > 0
-                  ? `${totalIssues} warning${totalIssues === 1 ? "" : "s"} or failure${totalIssues === 1 ? "" : "s"} need attention.`
-                  : `All ${totalPassing} check${totalPassing === 1 ? "" : "s"} pass — nice work.`}
-              </CardDescription>
-            </div>
-            <Link
-              href={`${basePath}/checks`}
-              className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-foreground underline-offset-4 hover:underline"
-            >
-              View all checks
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid gap-3 sm:grid-cols-2">
-              <CheckPillarSummary
-                label="SEO (search visibility)"
-                tally={seoTally}
-              />
-              <CheckPillarSummary
-                label="GEO (AI-ready)"
-                tally={geoTally}
-              />
-            </dl>
-          </CardContent>
-        </Card>
-      ) : null}
-
+      {/* Inspector quick-links */}
       {inspectorCards.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {inspectorCards.map((c) => (
@@ -360,45 +365,17 @@ export default async function AuditPageDetailPage({
                   </span>
                 </p>
               </div>
-              <ArrowRight
-                className="h-4 w-4 self-center text-muted-foreground transition-transform group-hover:translate-x-0.5"
-                aria-hidden
-              />
             </Link>
           ))}
         </div>
       ) : null}
-    </>
-  );
-}
 
-function CheckPillarSummary({
-  label,
-  tally,
-}: {
-  label: string;
-  tally: { pass: number; warn: number; fail: number };
-}) {
-  const total = tally.pass + tally.warn + tally.fail;
-  return (
-    <div className="rounded-md border border-border bg-card px-3 py-2">
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="mt-1 flex items-baseline gap-2 text-sm tabular-nums">
-        <span className="text-emerald-600 dark:text-emerald-400">
-          {tally.pass} pass
-        </span>
-        <span className="text-muted-foreground/60">·</span>
-        <span className="text-amber-600 dark:text-amber-400">
-          {tally.warn} warn
-        </span>
-        <span className="text-muted-foreground/60">·</span>
-        <span className="text-destructive">{tally.fail} fail</span>
-        <span className="ml-auto text-xs text-muted-foreground">
-          {total} total
-        </span>
-      </dd>
-    </div>
+      {/* Rollup exclusion — admin detail, moved to bottom */}
+      <AuditPageRollupExclusion
+        auditId={typedAudit.id}
+        pageId={typedPage.id}
+        excluded={typedPage.exclude_from_audit_score ?? false}
+      />
+    </>
   );
 }

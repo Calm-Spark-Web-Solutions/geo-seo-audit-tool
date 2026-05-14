@@ -99,8 +99,22 @@ function clampPacks(n: number): number {
   return Math.min(PACK_PRICING.hardMaxPacksPerCommunity, Math.max(0, Math.floor(n)));
 }
 
+// Mirror of `PORTAL_GATE_STATUSES` in lib/billing/actions.ts. When the
+// user's subscription is in one of these states, clicking Subscribe on a
+// tier card opens the Customer Portal instead of creating a duplicate
+// Stripe subscription.
+const LIVE_SUBSCRIPTION_STATUSES: ReadonlySet<string> = new Set([
+  "active",
+  "trialing",
+  "past_due",
+]);
+
 export function PricingCards({ subscription, stripeConfigured }: Props) {
   const hasCustomer = Boolean(subscription?.stripe_customer_id?.trim());
+  const hasLiveSubscription =
+    hasCustomer &&
+    typeof subscription?.status === "string" &&
+    LIVE_SUBSCRIPTION_STATUSES.has(subscription.status);
 
   const [quantity, setQuantity] = useState<number>(() =>
     defaultQuantityForSubscription(subscription),
@@ -149,6 +163,7 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
             isSelected={selectedTier === tier.id}
             onSelect={() => setSelectedTier(tier.id)}
             billingBlocked={billingBlocked}
+            hasLiveSubscription={hasLiveSubscription}
           />
         ))}
       </div>
@@ -373,6 +388,7 @@ function TierCard({
   isSelected,
   onSelect,
   billingBlocked,
+  hasLiveSubscription,
 }: {
   tier: PublicTierCard;
   quantity: number;
@@ -381,6 +397,7 @@ function TierCard({
   isSelected: boolean;
   onSelect: () => void;
   billingBlocked: boolean;
+  hasLiveSubscription: boolean;
 }) {
   const limits = PLAN_LIMITS_BY_SLUG[tier.monthlyKey];
 
@@ -473,32 +490,51 @@ function TierCard({
             ) : null}
           </div>
 
-          <form action={startCheckoutSession}>
-            <input type="hidden" name="priceKey" value={priceKey} />
-            <input type="hidden" name="quantity" value={String(quantity)} />
-            <input
-              type="hidden"
-              name="pagesPackQuantity"
-              value={String(packs)}
-            />
-            <Button
-              type="submit"
-              size="sm"
-              className="w-full"
-              disabled={billingBlocked}
-              onClick={(e) => {
-                e.stopPropagation();
-              }}
-            >
-              Subscribe {cycle === "monthly" ? "monthly" : "yearly"}
-            </Button>
-          </form>
+          {hasLiveSubscription ? (
+            <form action={openBillingPortalSession}>
+              <Button
+                type="submit"
+                size="sm"
+                variant="outline"
+                className="w-full"
+                disabled={billingBlocked}
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                Manage in Stripe
+              </Button>
+            </form>
+          ) : (
+            <form action={startCheckoutSession}>
+              <input type="hidden" name="priceKey" value={priceKey} />
+              <input type="hidden" name="quantity" value={String(quantity)} />
+              <input
+                type="hidden"
+                name="pagesPackQuantity"
+                value={String(packs)}
+              />
+              <Button
+                type="submit"
+                size="sm"
+                className="w-full"
+                disabled={billingBlocked}
+                onClick={(e) => {
+                  e.stopPropagation();
+                }}
+              >
+                Subscribe {cycle === "monthly" ? "monthly" : "yearly"}
+              </Button>
+            </form>
+          )}
         </div>
       </CardContent>
       <CardFooter className="text-xs text-muted-foreground">
         {billingBlocked
           ? "Checkout is temporarily unavailable. Please contact support."
-          : null}
+          : hasLiveSubscription
+            ? "Change quantity, tier, or Page Packs on your existing subscription \u2014 no duplicate charges."
+            : null}
       </CardFooter>
     </Card>
   );

@@ -104,6 +104,8 @@ export interface Audit {
   site_wide_checks?: AuditCheck[] | null;
   /** Origin-level Chrome UX Report (CrUX) p75 metrics when fetch succeeds. */
   crux_field_checks?: AuditCheck[] | null;
+  /** Cross-page duplicate title / meta description checks; populated after crawl. */
+  near_duplicate_checks?: AuditCheck[] | null;
   report_pdf_path: string | null;
   report_generated_at: string | null;
   engine_version?: number;

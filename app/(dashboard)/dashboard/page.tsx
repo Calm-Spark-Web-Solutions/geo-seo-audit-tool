@@ -180,6 +180,7 @@ export default async function DashboardPage() {
   })();
 
   const audits = (recentAudits ?? []) as RecentAudit[];
+  const companyNameById = new Map(companies.map((c) => [c.id, c.name]));
 
   if (orgCount === 0) {
     return (
@@ -214,7 +215,6 @@ export default async function DashboardPage() {
       <PageHeader
         title="Dashboard"
         description={headerDescription}
-        eyebrow={orgCount === 1 ? <span>{companies[0].name}</span> : undefined}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild>
@@ -310,15 +310,7 @@ export default async function DashboardPage() {
       ) : null}
 
       <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Recent visibility scans</h2>
-          <Link
-            href={browseCommunitiesHref}
-            className="text-sm text-muted-foreground hover:text-foreground hover:underline"
-          >
-            Communities
-          </Link>
-        </div>
+        <h2 className="text-lg font-semibold">Recent visibility scans</h2>
         {audits.length === 0 ? (
           <EmptyState
             icon={Gauge}
@@ -337,18 +329,35 @@ export default async function DashboardPage() {
                 const community = Array.isArray(a.communities)
                   ? a.communities[0]
                   : a.communities;
+                const companyId = community?.company_id;
+                const companyLabel =
+                  orgCount > 1 && companyId
+                    ? (companyNameById.get(companyId) ?? null)
+                    : null;
                 const auditRunning =
                   a.status === "pending" || a.status === "running";
+                const scanLabel = [
+                  community?.name ?? "Unknown community",
+                  companyLabel,
+                ]
+                  .filter(Boolean)
+                  .join(" — ");
                 return (
                   <li key={a.id}>
                     <Link
                       href={`/visibility-scans/${a.id}`}
-                      className="flex items-center justify-between gap-4 px-5 py-3 transition-colors hover:bg-accent"
+                      aria-label={`Open scan: ${scanLabel}`}
+                      className="flex items-start justify-between gap-4 px-5 py-3 transition-colors hover:bg-accent"
                     >
                       <div className="flex min-w-0 flex-col gap-0.5">
                         <span className="text-sm font-medium">
                           {community?.name ?? "Unknown community"}
                         </span>
+                        {companyLabel ? (
+                          <span className="text-xs text-muted-foreground">
+                            {companyLabel}
+                          </span>
+                        ) : null}
                         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
                           <span>{new Date(a.created_at).toLocaleString()}</span>
                           <span aria-hidden>·</span>
@@ -370,7 +379,7 @@ export default async function DashboardPage() {
                           </span>
                         ) : null}
                       </div>
-                      <div className="flex items-center gap-4 text-sm">
+                      <div className="flex shrink-0 items-baseline gap-4 text-sm pt-0.5">
                         <ScoreCell label="SEO" value={a.seo_score} />
                         <ScoreCell label="GEO" value={a.geo_score} />
                         <ScoreCell label="Total" value={a.score} bold />
@@ -383,24 +392,6 @@ export default async function DashboardPage() {
           </Card>
         )}
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Quick actions</CardTitle>
-          <CardDescription>Common tasks to keep visibility scans flowing.</CardDescription>
-        </CardHeader>
-        <div className="flex flex-wrap gap-2 px-6 pb-6">
-          <Button asChild>
-            <Link href={browseCommunitiesHref}>Browse communities</Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link href="/companies/new">
-              <Plus className="h-4 w-4" aria-hidden />
-              New company
-            </Link>
-          </Button>
-        </div>
-      </Card>
     </>
   );
 }

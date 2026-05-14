@@ -1,11 +1,13 @@
 import Link from "next/link";
 
 import { Brand } from "@/components/layout/Brand";
+import { ThemeToggleFixed } from "@/components/theme/ThemeToggleFixed";
 import { Button } from "@/components/ui/button";
 
 export default function HomePage() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-10 bg-background px-6 py-12 text-center">
+    <div className="relative flex min-h-screen flex-col items-center justify-center gap-10 bg-background px-6 py-12 text-center">
+      <ThemeToggleFixed />
       <Brand size="lg" />
 
       <div className="flex max-w-xl flex-col gap-3">

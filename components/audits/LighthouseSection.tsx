@@ -2,7 +2,9 @@ import { ArrowRight, CircleAlert, CircleCheck, CircleX, Gauge } from "lucide-rea
 import Link from "next/link";
 
 import { RefreshAuditPageButtons } from "@/components/audits/RefreshAuditPageButtons";
+import { ScoreRing } from "@/components/audits/ScoreRing";
 
+import { PSI_CATEGORY_KEYS, type PsiCategoryKey } from "@/lib/audit/psi-keys";
 import { cn } from "@/lib/utils";
 import type { AuditCheck, AuditCheckEvidenceItem, CheckResult } from "@/types";
 import {
@@ -12,15 +14,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-const PSI_CATEGORY_KEYS = [
-  "psi_performance",
-  "psi_accessibility",
-  "psi_best_practices",
-  "psi_seo",
-] as const;
-
-type PsiCategoryKey = (typeof PSI_CATEGORY_KEYS)[number];
 
 const TILE_LABEL: Record<PsiCategoryKey, string> = {
   psi_performance: "Performance",
@@ -116,29 +109,20 @@ export function LighthouseSection({
   );
 
   const tilesGrid = (
-    <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {tiles.map((tile) => {
-        const label =
-          TILE_LABEL[tile.key as PsiCategoryKey] ?? tile.label;
+        const label = TILE_LABEL[tile.key as PsiCategoryKey] ?? tile.label;
+        const score =
+          typeof tile.score === "number" ? tile.score : null;
         return (
           <li
             key={tile.key}
-            className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2"
+            className="flex flex-col items-center gap-2 rounded-lg border border-border bg-card px-3 py-4"
           >
-            <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {label}
-              </p>
-              <p
-                className={cn(
-                  "mt-1 text-2xl font-semibold tabular-nums",
-                  scoreTone(tile.score),
-                )}
-              >
-                {typeof tile.score === "number" ? tile.score : "—"}
-              </p>
-            </div>
-            <ResultIcon result={tile.result} />
+            <ScoreRing score={score} size={72} strokeWidth={10} />
+            <p className="text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {label}
+            </p>
           </li>
         );
       })}

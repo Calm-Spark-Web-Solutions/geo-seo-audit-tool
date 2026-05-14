@@ -4,6 +4,7 @@ import { Gauge } from "lucide-react";
 
 import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import { UserMenu } from "@/components/layout/UserMenu";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { cn } from "@/lib/utils";
 
 /** Hover / screen-reader context: matches getAuditQuotaSnapshot counting rules. */
@@ -88,10 +89,11 @@ export function SidebarAccountSection({
       {quotaLine}
       <div
         className={cn(
-          "flex w-full items-center",
-          collapsed ? "justify-center" : "min-w-0",
+          "flex w-full items-center gap-2",
+          collapsed ? "flex-col items-center" : "min-w-0 justify-end",
         )}
       >
+        <ThemeToggle compact={collapsed} />
         <UserMenu
           email={email}
           fullName={fullName}

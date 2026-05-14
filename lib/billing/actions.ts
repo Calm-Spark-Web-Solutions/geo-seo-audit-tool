@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import type Stripe from "stripe";
 
 import {
   COMMUNITY_QUANTITY_HARD_MAX,
@@ -33,6 +34,32 @@ function parseInteger(
   if (n < min) return min;
   if (n > max) return max;
   return n;
+}
+
+// A subscription in one of these states is "live" enough that creating a
+// second Checkout session would result in a duplicate Stripe subscription
+// (and a duplicate charge on next renewal). Route those clicks through the
+// Customer Portal so quantity / tier / Page Pack changes apply to the
+// existing subscription with Stripe-managed proration.
+const PORTAL_GATE_STATUSES: ReadonlySet<string> = new Set([
+  "active",
+  "trialing",
+  "past_due",
+]);
+
+async function redirectToCustomerPortal(
+  stripe: Stripe,
+  customerId: string,
+  site: string,
+): Promise<never> {
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: `${site}/settings`,
+  });
+  if (!session.url) {
+    redirect("/settings?billing=error");
+  }
+  redirect(session.url);
 }
 
 export async function startCheckoutSession(formData: FormData) {
@@ -84,8 +111,12 @@ export async function startCheckoutSession(formData: FormData) {
     priceKey.endsWith("_yearly") ? "pages_pack_yearly" : "pages_pack_monthly";
   const packPriceId =
     packsPerCommunity > 0 ? getStripePriceId(packPriceKey) : null;
-  // Silently drop the add-on if the Stripe Price isn't configured for the
-  // matching cycle — we'd rather complete checkout for the tier than fail.
+  // If the customer asked for Page Packs but we have no Stripe Price for
+  // the matching cycle, fail loudly instead of silently billing the tier
+  // only. Better the user re-tries than gets a surprise short bill.
+  if (packsPerCommunity > 0 && !packPriceId) {
+    redirect("/settings?billing=missing_price");
+  }
   const includePackItem = packsPerCommunity > 0 && Boolean(packPriceId);
 
   const supabase = await createClient();
@@ -98,12 +129,25 @@ export async function startCheckoutSession(formData: FormData) {
 
   const { data: existing } = await supabase
     .from("subscriptions")
-    .select("stripe_customer_id")
+    .select("stripe_customer_id, status, stripe_sub_id")
     .eq("user_id", user.id)
     .maybeSingle();
 
   const stripe = getStripe();
   const site = baseSiteUrl();
+
+  // Foot-gun guard: an existing live subscription + a fresh Checkout
+  // session would create a SECOND Stripe subscription (and a duplicate
+  // charge on next renewal). Send the user to the Customer Portal so any
+  // quantity / tier / Page Pack changes apply to the existing sub with
+  // Stripe-managed proration.
+  if (
+    existing?.stripe_customer_id &&
+    existing?.status &&
+    PORTAL_GATE_STATUSES.has(existing.status)
+  ) {
+    await redirectToCustomerPortal(stripe, existing.stripe_customer_id, site);
+  }
 
   const lineItems: { price: string; quantity: number }[] = [
     { price: priceId!, quantity },
@@ -163,13 +207,5 @@ export async function openBillingPortalSession() {
   const stripe = getStripe();
   const site = baseSiteUrl();
 
-  const session = await stripe.billingPortal.sessions.create({
-    customer: customerId,
-    return_url: `${site}/settings`,
-  });
-
-  if (!session.url) {
-    redirect("/settings?billing=error");
-  }
-  redirect(session.url);
+  await redirectToCustomerPortal(stripe, customerId, site);
 }

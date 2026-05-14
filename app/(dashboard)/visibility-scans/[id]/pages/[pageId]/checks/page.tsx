@@ -2,12 +2,14 @@ import { ArrowLeft, ExternalLink, Lightbulb } from "lucide-react";
 import Link from "next/link";
 
 import { PageDetailNav } from "@/components/audits/PageDetailNav";
+import { PageDetailStatBar } from "@/components/audits/PageDetailStatBar";
 import { SeoGeoCheckTabs } from "@/components/audits/SeoGeoCheckTabs";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { loadInspectorContext, tallyChecks } from "@/lib/audit/inspector";
 import { checksCountingTowardScore } from "@/lib/scoring/effective-scores";
+import type { FixItem } from "@/types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +23,8 @@ export default async function AuditPageChecksPage({
   const seoTally = tallyChecks(checksCountingTowardScore(ctx.seo));
   const geoTally = tallyChecks(checksCountingTowardScore(ctx.geo));
   const totalChecks = ctx.seo.length + ctx.geo.length;
+  const fixes = (ctx.page.fixes ?? []) as FixItem[];
+  const auditedAt = new Date(ctx.audit.created_at).toLocaleString();
 
   return (
     <>
@@ -48,9 +52,7 @@ export default async function AuditPageChecksPage({
               <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </a>
             <span aria-hidden>·</span>
-            <span>
-              Passing rows are hidden by default — toggle to reveal them.
-            </span>
+            <span>Passing rows are hidden by default — toggle to reveal them.</span>
           </span>
         }
         actions={
@@ -61,6 +63,16 @@ export default async function AuditPageChecksPage({
             </Link>
           </Button>
         }
+      />
+
+      {/* Score context at top of checks view */}
+      <PageDetailStatBar
+        score={ctx.page.score ?? null}
+        excluded={ctx.page.exclude_from_audit_score ?? false}
+        seoTally={seoTally}
+        geoTally={geoTally}
+        fixCount={fixes.length}
+        auditedAt={auditedAt}
       />
 
       {totalChecks === 0 ? (
