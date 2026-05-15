@@ -14,10 +14,12 @@ export function MobileNavSheet({
   companies,
   account,
   quota,
+  activeOrganizationIdCookie,
 }: {
   companies: Company[];
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
+  activeOrganizationIdCookie: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -100,6 +102,7 @@ export function MobileNavSheet({
                 companies={companies}
                 account={account}
                 quota={quota}
+                activeOrganizationIdCookie={activeOrganizationIdCookie}
                 variant="mobile"
                 onNavigate={() => setOpen(false)}
               />

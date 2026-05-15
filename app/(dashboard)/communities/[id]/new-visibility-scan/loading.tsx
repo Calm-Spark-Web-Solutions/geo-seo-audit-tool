@@ -22,9 +22,8 @@ export default function Loading() {
         description={
           <span className="text-muted-foreground">
             Pick which sitemap categories to include and how many URLs to
-            crawl. Each page is scored with deterministic checks plus PSI
-            and Anthropic commentary, so larger runs take proportionally
-            longer.
+            crawl. Each page is scored with deterministic checks plus PSI, so
+            larger runs take proportionally longer.
           </span>
         }
       />

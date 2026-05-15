@@ -10,15 +10,22 @@ export function Topbar({
   companies,
   account,
   quota,
+  activeOrganizationIdCookie,
 }: {
   companies: Company[];
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
+  activeOrganizationIdCookie: string | null;
 }) {
   return (
     <header className="sticky top-0 z-20 flex h-14 w-full shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-4 backdrop-blur md:hidden">
       <div className="flex min-w-0 items-center gap-3">
-        <MobileNavSheet companies={companies} account={account} quota={quota} />
+        <MobileNavSheet
+          companies={companies}
+          account={account}
+          quota={quota}
+          activeOrganizationIdCookie={activeOrganizationIdCookie}
+        />
         <div className="md:hidden">
           <Brand size="md" />
         </div>

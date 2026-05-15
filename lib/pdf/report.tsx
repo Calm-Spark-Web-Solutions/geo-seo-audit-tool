@@ -13,6 +13,7 @@ import {
   SEO_SECTION_TITLE,
 } from "@/lib/audit/reader-copy";
 import { categoryLabelSortKey } from "@/lib/crawler/shard-labels";
+import { categoryScoreEffective } from "@/lib/scoring/effective-scores";
 import type {
   Audit,
   AuditCheck,
@@ -946,16 +947,30 @@ function PillarSection({
 function PageBlock({
   page,
   isLast,
+  variant,
 }: {
   page: AuditPage;
   isLast: boolean;
+  variant: PdfReportVariant;
 }) {
-  const seo = (page.seo_results ?? []) as AuditCheck[];
-  const geo = (page.geo_results ?? []) as AuditCheck[];
+  const seo = checksForPdfVariant(
+    (page.seo_results ?? []) as AuditCheck[],
+    variant,
+  );
+  const geo = checksForPdfVariant(
+    (page.geo_results ?? []) as AuditCheck[],
+    variant,
+  );
   const url = safeText(page.url);
   const category =
     page.sitemap_category_label?.trim() || "Uncategorized";
-  const tint = scoreTint(page.score);
+  const chipScore =
+    variant === "seo"
+      ? categoryScoreEffective(seo)
+      : variant === "geo"
+        ? categoryScoreEffective(geo)
+        : page.score;
+  const tint = scoreTint(chipScore);
 
   return (
     <View
@@ -969,22 +984,26 @@ function PageBlock({
         </View>
         <View style={[styles.pageScoreChip, { backgroundColor: tint.bg }]}>
           <Text style={[styles.pageScoreValue, { color: tint.fg }]}>
-            {page.score != null ? page.score : "—"}
+            {chipScore != null ? chipScore : "—"}
           </Text>
           <Text style={styles.pageScoreSuffix}>of 100</Text>
         </View>
       </View>
 
-      <PillarSection
-        title={SEO_SECTION_TITLE}
-        description={SEO_SECTION_DESCRIPTION}
-        checks={seo}
-      />
-      <PillarSection
-        title={GEO_SECTION_TITLE}
-        description={GEO_SECTION_DESCRIPTION}
-        checks={geo}
-      />
+      {variant !== "geo" ? (
+        <PillarSection
+          title={SEO_SECTION_TITLE}
+          description={SEO_SECTION_DESCRIPTION}
+          checks={seo}
+        />
+      ) : null}
+      {variant !== "seo" ? (
+        <PillarSection
+          title={GEO_SECTION_TITLE}
+          description={GEO_SECTION_DESCRIPTION}
+          checks={geo}
+        />
+      ) : null}
     </View>
   );
 }
@@ -1027,10 +1046,29 @@ interface HeadlineCounts {
   fixesByPriority: Record<FixPriority, number>;
 }
 
+/** Checks retired from the engine but still present on legacy audit JSON — omit from PDFs. */
+const PDF_OMIT_DEPRECATED_CHECK_KEYS = new Set<string>(["images_with_captions"]);
+
+/** PDF scope: combined report or a single pillar slice for downloads. */
+export type PdfReportVariant = "full" | "seo" | "geo";
+
+export function checksForPdfVariant(
+  checks: AuditCheck[],
+  variant: PdfReportVariant,
+): AuditCheck[] {
+  let out: AuditCheck[];
+  if (variant === "full") out = checks;
+  else if (variant === "seo") out = checks.filter((c) => c.pillar !== "GEO");
+  else out = checks.filter((c) => c.pillar !== "SEO");
+
+  return out.filter((c) => !PDF_OMIT_DEPRECATED_CHECK_KEYS.has(c.key));
+}
+
 function computeHeadlineCounts(
   pages: AuditPage[],
   siteWide: AuditCheck[],
   cruxField: AuditCheck[],
+  variant: PdfReportVariant,
 ): HeadlineCounts {
   const counts: HeadlineCounts = {
     fails: 0,
@@ -1048,12 +1086,12 @@ function computeHeadlineCounts(
     }
   };
 
-  tally(siteWide);
-  tally(cruxField);
+  tally(checksForPdfVariant(siteWide, variant));
+  tally(checksForPdfVariant(cruxField, variant));
 
   for (const p of pages) {
-    tally((p.seo_results ?? []) as AuditCheck[]);
-    tally((p.geo_results ?? []) as AuditCheck[]);
+    tally(checksForPdfVariant((p.seo_results ?? []) as AuditCheck[], variant));
+    tally(checksForPdfVariant((p.geo_results ?? []) as AuditCheck[], variant));
     const fixes = (p.fixes ?? []) as FixItem[];
     counts.fixes += fixes.length;
     for (const fx of fixes) {
@@ -1075,6 +1113,7 @@ export interface AuditReportPdfProps {
   pages: AuditPage[];
   siteWideChecks: AuditCheck[];
   cruxFieldChecks: AuditCheck[];
+  variant?: PdfReportVariant;
 }
 
 export function AuditReportPdfDocument({
@@ -1084,7 +1123,9 @@ export function AuditReportPdfDocument({
   pages,
   siteWideChecks,
   cruxFieldChecks,
+  variant: variantProp,
 }: AuditReportPdfProps) {
+  const variant = variantProp ?? "full";
   const generated = new Date().toLocaleString();
   const auditDate = new Date(audit.created_at).toLocaleDateString();
 
@@ -1094,11 +1135,16 @@ export function AuditReportPdfDocument({
   /** Organization shown in running header / footer (company when linked). */
   const pdfBrandName = companyName || communityName;
 
+  const filteredSiteWide = checksForPdfVariant(siteWideChecks, variant);
+  const filteredCrux = checksForPdfVariant(cruxFieldChecks, variant);
+
+  /** Aggregate fixes omit pillar — same prioritized plan on all PDF variants. */
   const actionItems = aggregateActionItems(pages);
   const headlineCounts = computeHeadlineCounts(
     pages,
     siteWideChecks,
     cruxFieldChecks,
+    variant,
   );
   const pageGroups = groupPagesByCategory(pages);
   const distinctCategories = pageGroups.length;
@@ -1110,12 +1156,37 @@ export function AuditReportPdfDocument({
   const seoTint = scoreTint(audit.seo_score);
   const geoTint = scoreTint(audit.geo_score);
 
+  const docEyebrow =
+    variant === "seo"
+      ? "SEO Checks"
+      : variant === "geo"
+        ? "GEO Checks"
+        : "SEO & GEO Checks";
+  const docTitle =
+    variant === "seo"
+      ? `${pdfBrandName} — SEO checks — ${communityName}`
+      : variant === "geo"
+        ? `${pdfBrandName} — GEO checks — ${communityName}`
+        : `${pdfBrandName} — SEO & GEO checks — ${communityName}`;
+  const docSubject =
+    variant === "seo"
+      ? "SEO visibility report"
+      : variant === "geo"
+        ? "GEO / AI-readiness report"
+        : "SEO and GEO checks report";
+
+  const execDescription =
+    variant === "seo"
+      ? "Search-focused checks from this visibility scan (technical SEO, crawl signals, and Lighthouse-derived signals scoped to SEO)."
+      : variant === "geo"
+        ? "AI-readiness and engagement-focused checks (structure, depth, CrUX field metrics, and GEO-scoped Lighthouse signals)."
+        : "What this visibility scan covered and where to focus first.";
+
+  const showSiteWideSection =
+    filteredSiteWide.length > 0 || filteredCrux.length > 0;
+
   return (
-    <Document
-      title={`${pdfBrandName} — SEO & GEO checks — ${communityName}`}
-      author={pdfBrandName}
-      subject="SEO and GEO checks report"
-    >
+    <Document title={docTitle} author={pdfBrandName} subject={docSubject}>
       {/* Cover + executive summary + site-wide findings */}
       <Page
         size="A4"
@@ -1127,7 +1198,7 @@ export function AuditReportPdfDocument({
 
         {/* Cover hero (no running header on cover for cleaner look). */}
         <View style={styles.hero} wrap={false}>
-          <Text style={styles.heroEyebrow}>SEO &amp; GEO Checks</Text>
+          <Text style={styles.heroEyebrow}>{docEyebrow}</Text>
           <Text style={styles.heroTitle}>{communityName}</Text>
           {company?.name ? (
             <Text style={styles.heroSubtitle}>{companyName}</Text>
@@ -1167,8 +1238,18 @@ export function AuditReportPdfDocument({
             <View style={styles.scoreCardSpaced}>
               <Text style={styles.scoreLabel}>SEO</Text>
               <View style={styles.scoreValueRow}>
-                <Text style={[styles.scoreValue, { color: seoTint.fg }]}>
-                  {audit.seo_score ?? "—"}
+                <Text
+                  style={[
+                    styles.scoreValue,
+                    {
+                      color:
+                        variant === "geo"
+                          ? tokens.color.subtle
+                          : seoTint.fg,
+                    },
+                  ]}
+                >
+                  {variant === "geo" ? "—" : (audit.seo_score ?? "—")}
                 </Text>
                 <Text style={styles.scoreSuffix}>/ 100</Text>
               </View>
@@ -1176,8 +1257,18 @@ export function AuditReportPdfDocument({
             <View style={styles.scoreCardSpaced}>
               <Text style={styles.scoreLabel}>GEO</Text>
               <View style={styles.scoreValueRow}>
-                <Text style={[styles.scoreValue, { color: geoTint.fg }]}>
-                  {audit.geo_score ?? "—"}
+                <Text
+                  style={[
+                    styles.scoreValue,
+                    {
+                      color:
+                        variant === "seo"
+                          ? tokens.color.subtle
+                          : geoTint.fg,
+                    },
+                  ]}
+                >
+                  {variant === "seo" ? "—" : (audit.geo_score ?? "—")}
                 </Text>
                 <Text style={styles.scoreSuffix}>/ 100</Text>
               </View>
@@ -1195,7 +1286,7 @@ export function AuditReportPdfDocument({
         <SectionHeading
           eyebrow="Section 1"
           title="Executive summary"
-          description="What this visibility scan covered and where to focus first."
+          description={execDescription}
         />
 
         <View style={styles.cardWrap} wrap>
@@ -1206,15 +1297,17 @@ export function AuditReportPdfDocument({
               {distinctCategories} sitemap categor
               {distinctCategories === 1 ? "y" : "ies"}.
             </BulletLine>
-            <BulletLine>
-              {siteWideChecks.length} site-wide prob
-              {siteWideChecks.length === 1 ? "e" : "es"} (robots.txt, sitemap,
-              AI bot rules).
-            </BulletLine>
-            {cruxFieldChecks.length > 0 ? (
+            {filteredSiteWide.length > 0 ? (
               <BulletLine>
-                {cruxFieldChecks.length} CrUX field metric
-                {cruxFieldChecks.length === 1 ? "" : "s"} (Chrome UX Report
+                {filteredSiteWide.length} site-wide prob
+                {filteredSiteWide.length === 1 ? "e" : "es"} (robots.txt,
+                sitemap, AI bot rules).
+              </BulletLine>
+            ) : null}
+            {filteredCrux.length > 0 ? (
+              <BulletLine>
+                {filteredCrux.length} CrUX field metric
+                {filteredCrux.length === 1 ? "" : "s"} (Chrome UX Report
                 p75).
               </BulletLine>
             ) : null}
@@ -1260,29 +1353,40 @@ export function AuditReportPdfDocument({
           </View>
         ) : null}
 
-        {/* Site-wide findings */}
-        <SectionHeading
-          eyebrow="Section 2"
-          title="Site-wide findings"
-          description="Origin-level signals shared by every URL on this site."
-        />
+        {showSiteWideSection ? (
+          <>
+            {/* Site-wide findings */}
+            <SectionHeading
+              eyebrow="Section 2"
+              title="Site-wide findings"
+              description="Origin-level signals shared by every URL on this site."
+            />
 
-        <View style={styles.cardWrap} wrap>
-          <Text style={styles.cardTitle}>Crawl signals</Text>
-          <Text style={styles.cardDescription}>
-            robots.txt, AI bot directives, and sitemap discovery. Failures here
-            usually affect the entire site.
-          </Text>
-          <ChecksTable checks={siteWideChecks} hidePass={false} />
-        </View>
+            {filteredSiteWide.length > 0 ? (
+              <View style={styles.cardWrap} wrap>
+                <Text style={styles.cardTitle}>Crawl signals</Text>
+                <Text style={styles.cardDescription}>
+                  robots.txt, AI bot directives, and sitemap discovery.
+                  Failures here usually affect the entire site.
+                </Text>
+                <ChecksTable checks={filteredSiteWide} hidePass={false} />
+              </View>
+            ) : null}
 
-        <View style={styles.cardWrap} wrap>
-          <Text style={styles.cardTitle}>Field metrics — Chrome UX Report</Text>
-          <Text style={styles.cardDescription}>
-            Origin-level p75 metrics from real Chrome users when available.
-          </Text>
-          <ChecksTable checks={cruxFieldChecks} hidePass={false} />
-        </View>
+            {filteredCrux.length > 0 ? (
+              <View style={styles.cardWrap} wrap>
+                <Text style={styles.cardTitle}>
+                  Field metrics — Chrome UX Report
+                </Text>
+                <Text style={styles.cardDescription}>
+                  Origin-level p75 metrics from real Chrome users when
+                  available.
+                </Text>
+                <ChecksTable checks={filteredCrux} hidePass={false} />
+              </View>
+            ) : null}
+          </>
+        ) : null}
 
         <RunningHeader leftTitle={pdfBrandName} auditDate={auditDate} />
       </Page>
@@ -1354,6 +1458,7 @@ export function AuditReportPdfDocument({
                   key={p.id}
                   page={p}
                   isLast={idx === group.items.length - 1}
+                  variant={variant}
                 />
               ))}
             </View>
@@ -1378,14 +1483,18 @@ export function AuditReportPdfDocument({
           first
         />
         <View style={styles.cardWrap} wrap>
-          <GlossaryItem
-            term="SEO (search visibility)"
-            definition="How findable you are in classic search — titles, metadata, links, and technical basics."
-          />
-          <GlossaryItem
-            term="GEO (AI-ready content)"
-            definition="How well AI systems can understand, quote, and reuse your content — structure, depth, and clarity."
-          />
+          {variant !== "geo" ? (
+            <GlossaryItem
+              term="SEO (search visibility)"
+              definition="How findable you are in classic search — titles, metadata, links, and technical basics."
+            />
+          ) : null}
+          {variant !== "seo" ? (
+            <GlossaryItem
+              term="GEO (AI-ready content)"
+              definition="How well AI systems can understand, quote, and reuse your content — structure, depth, and clarity."
+            />
+          ) : null}
           <GlossaryItem
             term="Site-wide probe"
             definition="An origin-level signal (robots.txt, sitemap discovery, AI bot rules) that applies to every URL on the site rather than a single page."

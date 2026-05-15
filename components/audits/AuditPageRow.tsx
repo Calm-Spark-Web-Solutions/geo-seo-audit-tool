@@ -1,8 +1,20 @@
-import { ChevronRight, ExternalLink } from "lucide-react";
+"use client";
+
+import {
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  XCircle,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { useTransition } from "react";
+import { toast } from "sonner";
 
+import { removeAuditPageFromScan } from "@/app/(dashboard)/visibility-scans/[id]/pages/[pageId]/actions";
+import type { RemoveAuditPageSuccess } from "@/app/(dashboard)/visibility-scans/[id]/pages/[pageId]/actions";
 import { diffPage } from "@/lib/audit/diff";
 import type { AuditCheck, AuditPage, FixItem } from "@/types";
 
@@ -15,6 +27,10 @@ interface AuditPageRowProps {
   auditId: string;
   page: AuditPage;
   prior?: PriorPageSnapshot;
+  /** When true, show remove-from-scan control (terminal audits only). */
+  removeEnabled?: boolean;
+  /** Called after a successful server-side removal with refreshed rollup totals. */
+  onRemoved?: (totals: RemoveAuditPageSuccess) => void;
 }
 
 /**
@@ -23,7 +39,14 @@ interface AuditPageRowProps {
  * external-link affordance stays an `<a>` so users can open the audited
  * URL in a new tab without leaving the list.
  */
-export function AuditPageRow({ auditId, page, prior }: AuditPageRowProps) {
+export function AuditPageRow({
+  auditId,
+  page,
+  prior,
+  removeEnabled = false,
+  onRemoved,
+}: AuditPageRowProps) {
+  const [pendingRemove, startRemoveTransition] = useTransition();
   const seo = (page.seo_results ?? []) as AuditCheck[];
   const geo = (page.geo_results ?? []) as AuditCheck[];
   const fixes = (page.fixes ?? []) as FixItem[];
@@ -55,6 +78,28 @@ export function AuditPageRow({ auditId, page, prior }: AuditPageRowProps) {
           .filter(Boolean)
           .join(" · ");
 
+  function handleRemove() {
+    if (!removeEnabled || pendingRemove || !onRemoved) return;
+    const ok = window.confirm(
+      `Remove this URL from the scan?\n${page.url}\nRollup scores will update; this does not delete the community roster.`,
+    );
+    if (!ok) return;
+    startRemoveTransition(async () => {
+      const result = await removeAuditPageFromScan(auditId, page.id);
+      if (!result.ok) {
+        toast.error("Could not remove page", { description: result.error });
+        return;
+      }
+      onRemoved({
+        seo_score: result.seo_score,
+        geo_score: result.geo_score,
+        score: result.score,
+        pages_crawled: result.pages_crawled,
+        progress_total: result.progress_total,
+      });
+    });
+  }
+
   return (
     <div className="group relative flex items-center gap-3 border-b border-border py-3 transition-colors last:border-0 hover:bg-muted/30">
       <Link
@@ -65,6 +110,27 @@ export function AuditPageRow({ auditId, page, prior }: AuditPageRowProps) {
         <span className="truncate text-sm font-medium">{page.url}</span>
         <span className="text-xs text-muted-foreground">{summary}</span>
       </Link>
+      {removeEnabled && onRemoved ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="relative z-10 h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+          disabled={pendingRemove}
+          aria-label={`Remove ${page.url} from this scan`}
+          title="Remove from scan"
+          onClick={(e) => {
+            e.preventDefault();
+            handleRemove();
+          }}
+        >
+          {pendingRemove ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <XCircle className="h-3.5 w-3.5" aria-hidden />
+          )}
+        </Button>
+      ) : null}
       <a
         href={page.url}
         target="_blank"

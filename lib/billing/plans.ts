@@ -51,7 +51,7 @@ export const PUBLIC_TIERS: PublicTierCard[] = [
     tagline: TIER_PRICING.residence.tagline,
     limitsNote: formatPlanLimitsShort(PLAN_LIMITS_BY_SLUG.residence_monthly),
     bullets: tierBullets("residence_monthly", [
-      "Full SEO + GEO audits with AI commentary",
+      "Full SEO + GEO audits",
       "PDF export and audit history",
       "CrUX, PSI, and manual expert checklist",
     ]),

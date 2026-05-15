@@ -1,8 +1,10 @@
 "use server";
 
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { deriveRerunTargetUrls } from "@/lib/audit/derive-rerun-target-urls";
 import { enqueueAudit } from "@/lib/audit/queue";
 import {
   isAuditRunnerConfigured,
@@ -19,7 +21,7 @@ import {
   loadNewPagesAllowance,
 } from "@/lib/billing/page-quota";
 import { userAllowedPaidProductFeatures } from "@/lib/billing/subscription-access";
-import { sameOrigin } from "@/lib/crawler/normalize";
+import { sameAuditSiteOrigin } from "@/lib/crawler/normalize";
 import { consumeRateLimit } from "@/lib/ratelimit";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import { createClient } from "@/lib/supabase/server";
@@ -72,7 +74,7 @@ function parseSameOriginUrlList(
     if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
       return { error: protocolMessage };
     }
-    if (!sameOrigin(websiteUrl, trimmed)) {
+    if (!sameAuditSiteOrigin(websiteUrl, trimmed)) {
       return { error: originMessage };
     }
     if (seen.has(trimmed)) continue;
@@ -125,62 +127,13 @@ function parseSelection(
   };
 }
 
-export async function startAudit(
-  _prev: StartAuditFormState,
-  formData: FormData,
+async function commitAuditAfterParsed(
+  supabase: SupabaseClient,
+  user: User,
+  communityId: string,
+  community: { company_id: string; website_url: string },
+  parsed: ParsedSelection,
 ): Promise<StartAuditFormState> {
-  const communityId = formData.get("community_id");
-  if (typeof communityId !== "string" || !communityId) {
-    return { ok: false, error: "Missing community." };
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "You must be signed in." };
-
-  const stripeOn = isStripeConfigured();
-  const { data: subRow } = await supabase
-    .from("subscriptions")
-    .select("status")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!userAllowedPaidProductFeatures(stripeOn, subRow)) {
-    return {
-      ok: false,
-      error:
-        "An active subscription is required to run visibility scans. Open Settings to choose a plan.",
-    };
-  }
-
-  const quotaSnapshot = await getAuditQuotaSnapshot(supabase, user.id);
-  if (!quotaAllowsNewAudit(quotaSnapshot)) {
-    return {
-      ok: false,
-      error:
-        "Monthly scan limit reached for your plan. It resets next month, or upgrade in Billing for more scans.",
-    };
-  }
-
-  const { data: community, error: cErr } = await supabase
-    .from("communities")
-    .select("id, company_id, website_url")
-    .eq("id", communityId)
-    .maybeSingle();
-
-  if (cErr || !community) {
-    return {
-      ok: false,
-      error: "Community not found or you don’t have access.",
-    };
-  }
-
-  const parsed = parseSelection(formData, community.website_url);
-  if ("error" in parsed) {
-    return { ok: false, error: parsed.error };
-  }
-
   // Page-roster billing gate. Rescans of URLs already in the roster are
   // always free; new URLs eat the monthly new-page allowance and the
   // total roster cap (see `community_page_roster` + `lib/billing/page-quota.ts`).
@@ -273,17 +226,14 @@ export async function startAudit(
     return {
       ok: false,
       error:
-        err instanceof Error
-          ? err.message
-          : "Could not enqueue scan job.",
+        err instanceof Error ? err.message : "Could not enqueue scan job.",
     };
   }
 
   if (!isAuditRunnerConfigured()) {
     return {
       ok: false,
-      error:
-        "Scan runner is not configured. Please contact support.",
+      error: "Scan runner is not configured. Please contact support.",
     };
   }
 
@@ -294,4 +244,157 @@ export async function startAudit(
 
   revalidatePath(`/communities/${communityId}`);
   redirect(`/visibility-scans/${audit.id}?started=1`);
+}
+
+export async function startAudit(
+  _prev: StartAuditFormState,
+  formData: FormData,
+): Promise<StartAuditFormState> {
+  const communityId = formData.get("community_id");
+  if (typeof communityId !== "string" || !communityId) {
+    return { ok: false, error: "Missing community." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  const stripeOn = isStripeConfigured();
+  const { data: subRow } = await supabase
+    .from("subscriptions")
+    .select("status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!userAllowedPaidProductFeatures(stripeOn, subRow)) {
+    return {
+      ok: false,
+      error:
+        "An active subscription is required to run visibility scans. Open Settings to choose a plan.",
+    };
+  }
+
+  const quotaSnapshot = await getAuditQuotaSnapshot(supabase, user.id);
+  if (!quotaAllowsNewAudit(quotaSnapshot)) {
+    return {
+      ok: false,
+      error:
+        "Monthly scan limit reached for your plan. It resets next month, or upgrade in Billing for more scans.",
+    };
+  }
+
+  const { data: community, error: cErr } = await supabase
+    .from("communities")
+    .select("id, company_id, website_url")
+    .eq("id", communityId)
+    .maybeSingle();
+
+  if (cErr || !community) {
+    return {
+      ok: false,
+      error: "Community not found or you don’t have access.",
+    };
+  }
+
+  const parsed = parseSelection(formData, community.website_url);
+  if ("error" in parsed) {
+    return { ok: false, error: parsed.error };
+  }
+
+  return commitAuditAfterParsed(supabase, user, communityId, community, parsed);
+}
+
+export async function rerunVisibilityScan(
+  _prev: StartAuditFormState,
+  formData: FormData,
+): Promise<StartAuditFormState> {
+  const communityId = formData.get("community_id");
+  const sourceAuditId = formData.get("source_audit_id");
+  if (typeof communityId !== "string" || !communityId) {
+    return { ok: false, error: "Missing community." };
+  }
+  if (typeof sourceAuditId !== "string" || !sourceAuditId) {
+    return { ok: false, error: "Missing source scan." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  const stripeOn = isStripeConfigured();
+  const { data: subRow } = await supabase
+    .from("subscriptions")
+    .select("status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!userAllowedPaidProductFeatures(stripeOn, subRow)) {
+    return {
+      ok: false,
+      error:
+        "An active subscription is required to run visibility scans. Open Settings to choose a plan.",
+    };
+  }
+
+  const quotaSnapshot = await getAuditQuotaSnapshot(supabase, user.id);
+  if (!quotaAllowsNewAudit(quotaSnapshot)) {
+    return {
+      ok: false,
+      error:
+        "Monthly scan limit reached for your plan. It resets next month, or upgrade in Billing for more scans.",
+    };
+  }
+
+  const { data: community, error: cErr } = await supabase
+    .from("communities")
+    .select("id, company_id, website_url")
+    .eq("id", communityId)
+    .maybeSingle();
+
+  if (cErr || !community) {
+    return {
+      ok: false,
+      error: "Community not found or you don’t have access.",
+    };
+  }
+
+  const { data: prior, error: pErr } = await supabase
+    .from("audits")
+    .select("id, community_id, target_urls, shard_urls, max_pages")
+    .eq("id", sourceAuditId)
+    .maybeSingle();
+
+  if (pErr || !prior) {
+    return { ok: false, error: "That visibility scan was not found." };
+  }
+  if (prior.community_id !== communityId) {
+    return {
+      ok: false,
+      error: "That scan does not belong to this community.",
+    };
+  }
+
+  const derived = await deriveRerunTargetUrls(supabase, community.website_url, {
+    id: prior.id,
+    community_id: prior.community_id,
+    target_urls: prior.target_urls,
+    shard_urls: prior.shard_urls,
+    max_pages: prior.max_pages,
+  });
+
+  if (!derived.ok) {
+    return { ok: false, error: derived.error };
+  }
+
+  const shardUrlsForInsert = derived.shardUrlsMeta ?? [];
+
+  const parsed: ParsedSelection = {
+    maxPages: derived.urls.length,
+    targetUrls: derived.urls,
+    shardUrls: shardUrlsForInsert,
+  };
+
+  return commitAuditAfterParsed(supabase, user, communityId, community, parsed);
 }

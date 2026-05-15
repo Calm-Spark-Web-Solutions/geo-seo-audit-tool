@@ -6,6 +6,7 @@ import {
   ListChecks,
   LayoutDashboard,
   Search,
+  Share2,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -51,6 +52,12 @@ export function PageDetailNav({ auditId, pageId }: PageDetailNavProps) {
       label: "Lighthouse",
       href: `${base}/inspectors/lighthouse`,
       icon: Gauge,
+    },
+    {
+      id: "social-preview",
+      label: "Social preview",
+      href: `${base}/social-preview`,
+      icon: Share2,
     },
     {
       id: "checks",

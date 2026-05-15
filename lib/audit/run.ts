@@ -9,13 +9,14 @@ import {
   DEFAULT_USER_AGENT,
   isAssetUrl,
   normalizeUrl,
-  sameOrigin,
+  sameAuditSiteOrigin,
 } from "@/lib/crawler/normalize";
 import {
   buildUrlToSitemapCategoryLabelMap,
   fetchSitemap,
   fetchUrlsFromShards,
 } from "@/lib/crawler/sitemap";
+import { sortLegalUrlsLast } from "@/lib/crawler/url-scan-order";
 import { retryMissingPsiForAudit } from "@/lib/audit/psi-retry";
 import { recalculateAuditRollupScores } from "@/lib/audit/rollup-scores";
 import { recordRosterEntries } from "@/lib/billing/page-quota";
@@ -39,7 +40,10 @@ const LEGACY_MAX_PAGES = 10;
 const HARD_PAGE_CEILING = 1000;
 const FETCH_TIMEOUT_MS = 8000;
 const FETCH_BATCH_SIZE = 10;
-const SCORE_CONCURRENCY = 3;
+// Raised from 3 → 5 now that per-position PSI stagger is removed. The PSI
+// scorer handles 429s with retry/back-off, so pre-emptive serialisation is
+// no longer needed. 5 concurrent pages = ~40 % more scoring throughput.
+const SCORE_CONCURRENCY = 5;
 const ENGINE_VERSION = 4;
 
 interface PageWork {
@@ -78,6 +82,25 @@ function clampPageCap(raw: number | null): number {
   return Math.floor(raw);
 }
 
+/** Postgres `text[]` should deserialize as a string array; guard malformed JSON/types. */
+function coerceAuditTextArray(
+  auditId: string,
+  field: "shard_urls" | "target_urls",
+  raw: unknown,
+): string[] | null {
+  if (raw == null) return null;
+  if (!Array.isArray(raw)) {
+    observabilityLog.warn(
+      field === "shard_urls"
+        ? "audit.run.malformed_shard_urls"
+        : "audit.run.malformed_target_urls",
+      { auditId },
+    );
+    return null;
+  }
+  return raw.filter((u): u is string => typeof u === "string");
+}
+
 async function fetchAllHtml(urls: string[]): Promise<PageWork[]> {
   const out: PageWork[] = [];
   for (let i = 0; i < urls.length; i += FETCH_BATCH_SIZE) {
@@ -100,8 +123,8 @@ async function fetchAllHtml(urls: string[]): Promise<PageWork[]> {
 
 /**
  * Defensive normalize for an explicit URL allowlist persisted on the audit
- * row. Even though the action validated, we re-apply same-origin and asset
- * filters and dedupe so a tampered DB row can never make the runner fan out
+ * row. Even though the action validated, we re-apply same-site checks (including
+ * apex vs www), asset filters, and dedupe so a tampered DB row can never fan out
  * to a third-party host.
  */
 function normalizeTargetUrls(
@@ -115,7 +138,7 @@ function normalizeTargetUrls(
     if (typeof candidate !== "string") continue;
     const normalized = normalizeUrl(candidate);
     if (!normalized) continue;
-    if (!sameOrigin(base, normalized)) continue;
+    if (!sameAuditSiteOrigin(base, normalized)) continue;
     if (isAssetUrl(normalized)) continue;
     if (seen.has(normalized)) continue;
     seen.add(normalized);
@@ -141,17 +164,18 @@ async function resolveUrls(
 ): Promise<string[]> {
   if (targetUrls && targetUrls.length > 0) {
     const normalized = normalizeTargetUrls(base, targetUrls, maxPages);
-    if (normalized.length > 0) return normalized;
+    if (normalized.length > 0) return sortLegalUrlsLast(normalized);
     // Fall through to shard / sitemap if every target URL was filtered out
     // (e.g. all were foreign-origin in a tampered row).
   }
 
   if (shardUrls && shardUrls.length > 0) {
-    return fetchUrlsFromShards(shardUrls, base, {
+    const list = await fetchUrlsFromShards(shardUrls, base, {
       maxPages,
       timeoutMs: FETCH_TIMEOUT_MS,
       userAgent: DEFAULT_USER_AGENT,
     });
+    return sortLegalUrlsLast(list);
   }
 
   const fromSitemap = await fetchSitemap(base, {
@@ -159,13 +183,14 @@ async function resolveUrls(
     timeoutMs: FETCH_TIMEOUT_MS,
     userAgent: DEFAULT_USER_AGENT,
   });
-  if (fromSitemap.length > 0) return fromSitemap;
+  if (fromSitemap.length > 0) return sortLegalUrlsLast(fromSitemap);
 
-  return crawlSite(base, {
+  const crawled = await crawlSite(base, {
     maxPages,
     timeoutMs: FETCH_TIMEOUT_MS,
     userAgent: DEFAULT_USER_AGENT,
   });
+  return sortLegalUrlsLast(crawled);
 }
 
 /**
@@ -230,10 +255,16 @@ export async function runAudit({
   const maxPages = clampPageCap(
     (auditRow?.max_pages as number | null | undefined) ?? null,
   );
-  const shardUrls =
-    (auditRow?.shard_urls as string[] | null | undefined) ?? null;
-  const targetUrls =
-    (auditRow?.target_urls as string[] | null | undefined) ?? null;
+  const shardUrls = coerceAuditTextArray(
+    auditId,
+    "shard_urls",
+    auditRow?.shard_urls,
+  );
+  const targetUrls = coerceAuditTextArray(
+    auditId,
+    "target_urls",
+    auditRow?.target_urls,
+  );
 
   await supabase
     .from("audits")
@@ -242,40 +273,28 @@ export async function runAudit({
 
   devRunnerConsole("runAudit: audits.status -> running", { auditId });
 
-  let siteWideChecks: AuditCheck[] = [];
-  try {
-    siteWideChecks = await runSiteWideChecks(base);
-  } catch {
-    siteWideChecks = [];
-  }
-
-  let cruxFieldChecks: AuditCheck[] = [];
-  try {
-    cruxFieldChecks = await runCruxOriginChecks(base);
-  } catch {
-    cruxFieldChecks = [];
-  }
-
-  await supabase
-    .from("audits")
-    .update({
-      site_wide_checks: siteWideChecks,
-      crux_field_checks: cruxFieldChecks,
-    })
-    .eq("id", auditId);
-
-  const tResolve = Date.now();
-  devRunnerConsole("runAudit: resolveUrls starting", {
+  // Run site-wide probes and URL discovery in parallel — they all only need
+  // `base` and the audit-row fields already in scope, so there is no data
+  // dependency between them. Previously these ran sequentially, costing
+  // the sum of their latencies (robots fetch + CrUX API + sitemap walk).
+  const tStartup = Date.now();
+  devRunnerConsole("runAudit: startup parallel (siteWide + crux + resolveUrls)", {
     auditId,
     maxPages,
     hasTargetUrls: Boolean(targetUrls?.length),
     hasShardUrls: Boolean(shardUrls?.length),
   });
-  const urls = await resolveUrls(base, maxPages, shardUrls, targetUrls);
-  devRunnerConsole("runAudit: resolveUrls done", {
+  const [siteWideChecksRaw, cruxFieldChecksRaw, urls] = await Promise.all([
+    runSiteWideChecks(base).catch((): AuditCheck[] => []),
+    runCruxOriginChecks(base).catch((): AuditCheck[] => []),
+    resolveUrls(base, maxPages, shardUrls, targetUrls),
+  ]);
+  let siteWideChecks: AuditCheck[] = siteWideChecksRaw;
+  const cruxFieldChecks: AuditCheck[] = cruxFieldChecksRaw;
+  devRunnerConsole("runAudit: startup parallel done", {
     auditId,
     urlCount: urls.length,
-    durationMs: Date.now() - tResolve,
+    durationMs: Date.now() - tStartup,
   });
 
   observabilityLog.info("audit.urls_resolved", {
@@ -284,22 +303,15 @@ export async function runAudit({
     durationMs: Date.now() - t0,
   });
 
-  let categoryByUrl = new Map<string, string>();
-  if (shardUrls && shardUrls.length > 0) {
-    categoryByUrl = await buildUrlToSitemapCategoryLabelMap(
-      shardUrls,
-      base,
-      {
-        timeoutMs: FETCH_TIMEOUT_MS,
-        userAgent: DEFAULT_USER_AGENT,
-      },
-      new Set(urls),
-    );
-  }
-
+  // Write site-wide checks, CrUX results, and progress_total in a single
+  // round-trip (previously two separate awaited writes).
   await supabase
     .from("audits")
-    .update({ progress_total: urls.length })
+    .update({
+      site_wide_checks: siteWideChecks,
+      crux_field_checks: cruxFieldChecks,
+      progress_total: urls.length,
+    })
     .eq("id", auditId);
 
   devRunnerConsole("runAudit: progress_total set", {
@@ -309,6 +321,10 @@ export async function runAudit({
 
   if (urls.length === 0) {
     observabilityLog.warn("audit.run.no_urls", {
+      auditId,
+      durationMs: Date.now() - t0,
+    });
+    devRunnerConsole("runAudit: no_urls (resolveUrls returned empty)", {
       auditId,
       durationMs: Date.now() - t0,
     });
@@ -329,7 +345,43 @@ export async function runAudit({
 
   if (await isAuditCancelled(supabase, auditId)) return;
 
-  const work = await fetchAllHtml(urls);
+  // Fetch page HTML and build the sitemap category map in parallel — both
+  // only need the resolved URL list and are otherwise independent. Previously
+  // the category map was awaited before fetching any HTML, adding a full
+  // sitemap round-trip to the critical path on every shard-based audit.
+  const [work, categoryByUrl] = await Promise.all([
+    fetchAllHtml(urls),
+    shardUrls && shardUrls.length > 0
+      ? buildUrlToSitemapCategoryLabelMap(
+          shardUrls,
+          base,
+          { timeoutMs: FETCH_TIMEOUT_MS, userAgent: DEFAULT_USER_AGENT },
+          new Set(urls),
+        )
+      : Promise.resolve(new Map<string, string>()),
+  ]);
+
+  if (urls.length > 0 && work.length === 0) {
+    observabilityLog.warn("audit.run.all_fetch_failed", {
+      auditId,
+      urlCount: urls.length,
+      durationMs: Date.now() - t0,
+    });
+    devRunnerConsole("runAudit: all_fetch_failed (every page HTML fetch returned null)", {
+      auditId,
+      urlCount: urls.length,
+      durationMs: Date.now() - t0,
+      hint: "See prior [audit-runner] fetchPageWithMeta failed lines for reasons",
+    });
+    // Throw so finalizeErrored stores the reason in audit_jobs.last_error and
+    // the queue can retry. Common causes: bot-blocking (403/non-HTML response),
+    // DNS failure, or the site being temporarily unreachable.
+    throw new Error(
+      `All ${urls.length} page fetch(es) failed — the site may be blocking automated crawlers, ` +
+      `is temporarily unavailable, or is returning non-HTML responses (e.g. a bot-challenge page). ` +
+      `Check that the community website URL is correct and publicly accessible, then retry.`,
+    );
+  }
 
   const crawlGraphChecks = buildCrawlGraphChecks(work, base);
   siteWideChecks = [...siteWideChecks, ...crawlGraphChecks];
@@ -340,6 +392,9 @@ export async function runAudit({
     .eq("id", auditId);
 
   let pagesCrawled = 0;
+  // Collect roster URLs across all batches; written in a single upsert at
+  // the end instead of one DB call per page (was N round-trips → 1).
+  const rosterUrls: string[] = [];
 
   // Running rollup aggregates so the live UI sees averages update without
   // re-reading every audit_pages row from Postgres on each batch (the old
@@ -361,14 +416,14 @@ export async function runAudit({
 
     const batch = work.slice(i, i + SCORE_CONCURRENCY);
     const scored = await Promise.all(
-      batch.map(async ({ url, html, meta }, batchIndex) => {
-        // Stagger PSI calls within the batch by 1.5 s per position to reduce
-        // simultaneous requests and ease Google rate-limit pressure.
+      batch.map(async ({ url, html, meta }) => {
+        // No artificial stagger — if Google rate-limits us (429) the PSI
+        // scorer already handles it with retry/back-off. Pre-emptive per-
+        // position delays added ~1.5–4.5 s of wasted wall time per batch.
         const result = await scoreAndAnalyzePage({
           url,
           html,
           fetchMeta: meta,
-          psiStaggerMs: batchIndex * 1500,
         });
         return { url, html, ...result };
       }),
@@ -379,6 +434,7 @@ export async function runAudit({
     // counter moves forward monotonically — parallelising inserts within a
     // batch does not affect that invariant.
     type PersistResult = {
+      url: string;
       excludePage: boolean;
       seoChecks: typeof scored[0]["seoChecks"];
       geoChecks: typeof scored[0]["geoChecks"];
@@ -410,32 +466,14 @@ export async function runAudit({
           );
         }
 
-        // Page-roster billing: idempotent (unique on community_id+url) so
-        // parallel calls for different URLs in the same batch are safe.
-        if (communityId) {
-          try {
-            await recordRosterEntries(supabase, {
-              communityId,
-              auditId,
-              urls: [s.url],
-            });
-          } catch (err) {
-            observabilityLog.warn("audit.roster_persist_failed", {
-              auditId,
-              communityId,
-              url: s.url,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
-
-        return { excludePage, seoChecks: s.seoChecks, geoChecks: s.geoChecks };
+        return { url: s.url, excludePage, seoChecks: s.seoChecks, geoChecks: s.geoChecks };
       }),
     );
 
-    // Accumulate rolling averages from the batch results.
-    for (const { excludePage, seoChecks, geoChecks } of persistResults) {
+    // Accumulate rolling averages and collect URLs for the deferred roster write.
+    for (const { url, excludePage, seoChecks, geoChecks } of persistResults) {
       pagesCrawled += 1;
+      rosterUrls.push(url);
       if (!excludePage) {
         const seo = categoryScoreEffective(seoChecks);
         const geo = categoryScoreEffective(geoChecks);
@@ -446,7 +484,12 @@ export async function runAudit({
       }
     }
 
-    await supabase
+    // Fire-and-forget: this is a live-UI progress indicator, not critical-
+    // path data. Not awaiting it lets scoring of the next batch start
+    // immediately instead of blocking on a Supabase round-trip (~20–50 ms)
+    // after every SCORE_CONCURRENCY pages. The final status:"complete"
+    // update is still awaited and is the authoritative write.
+    void supabase
       .from("audits")
       .update({
         pages_crawled: pagesCrawled,
@@ -458,6 +501,24 @@ export async function runAudit({
   }
 
   if (await isAuditCancelled(supabase, auditId)) return;
+
+  // Single batched roster upsert — replaces N per-page calls with one.
+  // recordRosterEntries is idempotent (unique on community_id+url).
+  if (communityId && rosterUrls.length > 0) {
+    try {
+      await recordRosterEntries(supabase, {
+        communityId,
+        auditId,
+        urls: rosterUrls,
+      });
+    } catch (err) {
+      observabilityLog.warn("audit.roster_persist_failed", {
+        auditId,
+        communityId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   // Final canonical recompute. This single read closes any drift between
   // the in-memory aggregate and the persisted rows (e.g. if a user edits

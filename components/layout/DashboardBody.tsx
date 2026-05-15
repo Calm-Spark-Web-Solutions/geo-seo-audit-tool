@@ -12,11 +12,14 @@ export function DashboardBody({
   companies,
   account,
   quota,
+  activeOrganizationIdCookie,
   children,
 }: {
   companies: Company[];
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
+  /** From `rl_active_org`; aligns sidebar with dashboard org scope off `/companies/[id]`. */
+  activeOrganizationIdCookie: string | null;
   children: React.ReactNode;
 }) {
   const { collapsed, hydrated } = useSidebarCollapsed();
@@ -30,7 +33,12 @@ export function DashboardBody({
           : "md:grid-cols-[15rem_minmax(0,1fr)]",
       )}
     >
-      <Sidebar companies={companies} account={account} quota={quota} />
+      <Sidebar
+        companies={companies}
+        account={account}
+        quota={quota}
+        activeOrganizationIdCookie={activeOrganizationIdCookie}
+      />
       <main
         id="main"
         className="min-w-0 px-4 py-4 md:px-8 md:pt-5 md:pb-8"

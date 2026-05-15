@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Building, Plus, SearchX } from "lucide-react";
 
+import { OrgContextSync } from "@/components/companies/OrgContextSync";
 import { CommunityDirectorySearch } from "@/components/communities/CommunityDirectorySearch";
 import { CommunityListPagination } from "@/components/communities/CommunityListPagination";
 import { CommunityTable } from "@/components/communities/CommunityTable";
@@ -141,6 +142,7 @@ export default async function CompanyDetailPage({
 
   return (
     <>
+      <OrgContextSync companyId={id} />
       <PageHeader
         eyebrow={
           <Link href="/companies" className="hover:underline">

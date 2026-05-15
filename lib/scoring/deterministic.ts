@@ -1137,21 +1137,6 @@ export function runDeterministicChecks(
       }
     : undefined;
 
-  const figures = $("figure").length;
-  const captions = $("figcaption").length;
-  let captionResult: CheckResult;
-  let captionExplanation: string;
-  if (imgs.length === 0) {
-    captionResult = "warn";
-    captionExplanation = "No images on this page.";
-  } else if (captions > 0 && figures > 0) {
-    captionResult = "pass";
-    captionExplanation = `Found ${captions} figure caption(s) attached to ${figures} <figure> element(s).`;
-  } else {
-    captionResult = "warn";
-    captionExplanation = "Images present but no <figcaption>; captions help AI summaries cite images.";
-  }
-
   // ---------- outbound authority links ----------
 
   const AUTHORITY_SIGNALS = [".gov", ".edu", "schema.org", "google.com", "nih.gov", "cdc.gov", "aarp.org"];
@@ -1176,11 +1161,9 @@ export function runDeterministicChecks(
     }
   });
   const outboundResult: CheckResult =
-    externalLinkCount === 0
-      ? "fail"
-      : authorityLinkCount > 0
-        ? "pass"
-        : "warn";
+    authorityLinkCount > 0
+      ? "pass"
+      : "warn";
   const outboundExplanation =
     externalLinkCount === 0
       ? "No external outbound links found; linking to authoritative sources signals trust to AI crawlers."
@@ -1415,14 +1398,6 @@ export function runDeterministicChecks(
         evidence: lqEvidence,
       },
     ),
-    check(
-      "images_with_captions",
-      "Images with captions",
-      captionResult,
-      captionExplanation,
-      { category: "Accessibility & media",
-      pillar: "GEO",
-    }),
   ];
 
   // ---------- crawl budget URL heuristic ----------

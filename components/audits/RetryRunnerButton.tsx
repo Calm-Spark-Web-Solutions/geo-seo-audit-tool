@@ -14,9 +14,11 @@ const initialState: RetryRunnerState = { ok: true };
 
 interface RetryRunnerButtonProps {
   auditId: string;
+  /** Override the button label. Defaults to "Retry runner". */
+  label?: string;
 }
 
-export function RetryRunnerButton({ auditId }: RetryRunnerButtonProps) {
+export function RetryRunnerButton({ auditId, label = "Retry runner" }: RetryRunnerButtonProps) {
   const [state, action, pending] = useActionState(
     retryAuditRunner,
     initialState,
@@ -31,10 +33,10 @@ export function RetryRunnerButton({ auditId }: RetryRunnerButtonProps) {
     if (!wasPending.current) return;
     wasPending.current = false;
     if (state.ok && state.error === undefined) {
-      toast.success("Runner kick sent");
+      toast.success("Scan queued — runner kick sent");
     }
     if (!state.ok && state.error) {
-      toast.error("Could not retry runner", { description: state.error });
+      toast.error("Could not retry scan", { description: state.error });
     }
   }, [pending, state]);
 
@@ -46,14 +48,14 @@ export function RetryRunnerButton({ auditId }: RetryRunnerButtonProps) {
         size="sm"
         variant="secondary"
         disabled={pending}
-        aria-label="Retry audit runner"
+        aria-label={label}
       >
         {pending ? (
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
         ) : (
           <RotateCw className="h-4 w-4" aria-hidden />
         )}
-        {pending ? "Sending…" : "Retry runner"}
+        {pending ? "Sending…" : label}
       </Button>
     </form>
   );

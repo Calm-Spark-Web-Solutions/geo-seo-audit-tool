@@ -5,7 +5,7 @@ import { fetchPageWithMeta } from "@/lib/crawler/fetch";
 import {
   DEFAULT_USER_AGENT,
   normalizeUrl,
-  sameOrigin,
+  sameAuditSiteOrigin,
 } from "@/lib/crawler/normalize";
 import {
   mergeFixesFromAllChecks,
@@ -153,8 +153,8 @@ async function loadPageCommunityContext(
   if (
     !base ||
     !pageUrlNorm ||
-    !sameOrigin(base, pageUrlNorm) ||
-    !sameOrigin(base, page.url as string)
+    !sameAuditSiteOrigin(base, pageUrlNorm) ||
+    !sameAuditSiteOrigin(base, page.url as string)
   ) {
     return {
       error: {

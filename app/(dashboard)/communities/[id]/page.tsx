@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink, Gauge, Loader2 } from "lucide-react";
 
 import { DeleteAuditButton } from "@/components/audits/DeleteAuditButton";
+import { RerunVisibilityScanButton } from "@/components/audits/RerunVisibilityScanButton";
 import { StatusBadge } from "@/components/audits/StatusBadge";
 import { AuditTrend } from "@/components/communities/AuditTrend";
 import { DeleteCommunityButton } from "@/components/communities/DeleteCommunityButton";
@@ -135,7 +136,6 @@ export default async function CommunityDetailPage({
         ) : (
           <div className="flex flex-col divide-y divide-border rounded-lg border border-border bg-card">
             {typedAudits.map((audit) => {
-              const isFailed = audit.status === "failed";
               const isRunning =
                 audit.status === "pending" || audit.status === "running";
               const total = audit.progress_total ?? 0;
@@ -190,19 +190,18 @@ export default async function CommunityDetailPage({
                     <Score label="SEO" value={audit.seo_score} />
                     <Score label="GEO" value={audit.geo_score} />
                     <Score label="Total" value={audit.score} bold />
-                    {isFailed ? (
-                      <Button size="sm" variant="outline" asChild>
-                        <Link href={`/communities/${typedCommunity.id}/new-visibility-scan`}>
-                          Retry
-                        </Link>
-                      </Button>
-                    ) : null}
                     {!isRunning ? (
-                      <DeleteAuditButton
-                        auditId={audit.id}
-                        auditLabel={new Date(audit.created_at).toLocaleString()}
-                        variant="compact"
-                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <RerunVisibilityScanButton
+                          communityId={typedCommunity.id}
+                          sourceAuditId={audit.id}
+                        />
+                        <DeleteAuditButton
+                          auditId={audit.id}
+                          auditLabel={new Date(audit.created_at).toLocaleString()}
+                          variant="compact"
+                        />
+                      </div>
                     ) : null}
                   </div>
                 </div>

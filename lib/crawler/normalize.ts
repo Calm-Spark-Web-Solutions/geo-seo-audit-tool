@@ -58,6 +58,35 @@ export function sameOrigin(a: string, b: string): boolean {
   }
 }
 
+/**
+ * True when both URLs use http(s), share the same scheme and port, and their
+ * hostnames match after stripping a single leading `www.` label (apex ↔ www).
+ * Used for audit allowlists, sitemap/crawl guards, and form validation where
+ * the strict WHATWG origin would falsely reject the site's canonical alias.
+ */
+export function sameAuditSiteOrigin(a: string, b: string): boolean {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    // Both must be http(s)
+    if (ua.protocol !== "http:" && ua.protocol !== "https:") return false;
+    if (ub.protocol !== "http:" && ub.protocol !== "https:") return false;
+    // Port must match when both are the same protocol. When protocols differ
+    // (e.g. community stored as http:// but sitemap returns https:// URLs)
+    // we treat them as the same site — the actual fetch will follow the
+    // http→https redirect. Only compare ports when they are explicit and
+    // non-default for the respective scheme.
+    const portA = ua.port || (ua.protocol === "https:" ? "443" : "80");
+    const portB = ub.port || (ub.protocol === "https:" ? "443" : "80");
+    if (ua.protocol === ub.protocol && portA !== portB) return false;
+    const ha = ua.hostname.replace(/^www\./i, "");
+    const hb = ub.hostname.replace(/^www\./i, "");
+    return ha.toLowerCase() === hb.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
 export function originOf(input: string): string | null {
   try {
     return new URL(input).origin;

@@ -1,11 +1,24 @@
-import { assertSafeUrl } from "@/lib/security/ssrf";
+import { DEFAULT_USER_AGENT } from "@/lib/crawler/normalize";
 import { boundedText } from "@/lib/security/bounded-fetch";
+import { assertSafeUrl } from "@/lib/security/ssrf";
 import type { AuditCheck, AuditCheckEvidenceItem, CheckResult } from "@/types";
 
 import { scoreFromResult } from "./deterministic";
 
 const PROBE_TIMEOUT_MS = 5000;
 const PROBE_MAX_BYTES = 64 * 1024;
+
+const METHODOLOGY_PREFIX =
+  "We sample up to 18 unique same-origin links from this page’s HTML and request each URL once (HEAD, falling back to GET when servers reject HEAD). " +
+  "“Could not be checked” means our scanner hit a timeout, bot/WAF block, or network error—it does not prove the link is broken for visitors. ";
+
+function probeHeaders(refererUrl: string): HeadersInit {
+  return {
+    Accept: "text/html,*/*",
+    "User-Agent": DEFAULT_USER_AGENT,
+    Referer: refererUrl,
+  };
+}
 
 /**
  * HEAD/GET a small set of same-origin targets pre-collected by the
@@ -14,6 +27,7 @@ const PROBE_MAX_BYTES = 64 * 1024;
  */
 export async function probeBrokenInternalLinks(
   targets: string[],
+  refererUrl: string,
 ): Promise<AuditCheck> {
   if (targets.length === 0) {
     return {
@@ -33,12 +47,60 @@ export async function probeBrokenInternalLinks(
     | { kind: "error"; url: string; note: string }
     | { kind: "ok" };
 
+  async function finalizeResponse(
+    target: string,
+    res: Response,
+    status: number,
+    methodUsed: "HEAD" | "GET",
+  ): Promise<ProbeOutcome> {
+    if (status >= 400) {
+      return { kind: "broken", url: target, status };
+    }
+    if (methodUsed === "GET") {
+      await boundedText(res, PROBE_MAX_BYTES);
+    } else {
+      try {
+        await res.arrayBuffer();
+      } catch {
+        /* ignore */
+      }
+    }
+    return { kind: "ok" };
+  }
+
+  async function probeWithGet(
+    targetUrl: string,
+    headers: HeadersInit,
+  ): Promise<ProbeOutcome> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
+    try {
+      const res = await fetch(targetUrl, {
+        method: "GET",
+        redirect: "follow",
+        signal: ctrl.signal,
+        headers,
+      });
+      return finalizeResponse(targetUrl, res, res.status, "GET");
+    } catch (e) {
+      return {
+        kind: "error",
+        url: targetUrl,
+        note: e instanceof Error ? e.message : "request failed",
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function probeOne(target: string): Promise<ProbeOutcome> {
     try {
       await assertSafeUrl(target);
     } catch {
       return { kind: "error", url: target, note: "blocked (safety check)" };
     }
+
+    const headers = probeHeaders(refererUrl);
 
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
@@ -47,27 +109,36 @@ export async function probeBrokenInternalLinks(
         method: "HEAD",
         redirect: "follow",
         signal: ctrl.signal,
-        headers: { Accept: "text/html,*/*" },
+        headers,
       });
       let status = res.status;
-      if (status === 405 || status === 501) {
-        try { await res.arrayBuffer(); } catch { /* ignore */ }
-        res = await fetch(target, {
-          method: "GET",
-          redirect: "follow",
-          signal: ctrl.signal,
-          headers: { Accept: "text/html,*/*" },
-        });
-        status = res.status;
-        await boundedText(res, PROBE_MAX_BYTES);
-      } else if (status >= 200 && status < 400) {
-        try { await res.arrayBuffer(); } catch { /* ignore */ }
+
+      const retryWithGet =
+        status === 405 || status === 501 || status === 401 || status === 403;
+
+      if (retryWithGet) {
+        try {
+          await res.arrayBuffer();
+        } catch {
+          /* ignore */
+        }
+        clearTimeout(timer);
+        return probeWithGet(target, headers);
       }
-      return status >= 400
-        ? { kind: "broken", url: target, status }
-        : { kind: "ok" };
+
+      return finalizeResponse(target, res, status, "HEAD");
     } catch (e) {
-      return { kind: "error", url: target, note: e instanceof Error ? e.message : "request failed" };
+      clearTimeout(timer);
+      const afterGet = await probeWithGet(target, headers);
+      if (afterGet.kind === "error") {
+        const headMsg = e instanceof Error ? e.message : "HEAD failed";
+        return {
+          kind: "error",
+          url: target,
+          note: `${headMsg}; ${afterGet.note}`,
+        };
+      }
+      return afterGet;
     } finally {
       clearTimeout(timer);
     }
@@ -82,14 +153,16 @@ export async function probeBrokenInternalLinks(
     else if (o.kind === "error") errors.push({ url: o.url, note: o.note });
   }
 
-  const failN = broken.length + errors.length;
-  let result: CheckResult = "pass";
-  if (failN === 0) result = "pass";
-  else if (failN === 1) result = "warn";
-  else result = "fail";
+  let result: CheckResult;
+  if (broken.length >= 2) result = "fail";
+  else if (broken.length === 1 || errors.length > 0) result = "warn";
+  else result = "pass";
+
+  const issueCount = broken.length + errors.length;
 
   const lines: string[] = [
-    `Sampled ${targets.length} unique same-origin URL(s) from this page’s links.`,
+    METHODOLOGY_PREFIX +
+      `Sampled ${targets.length} unique same-origin URL(s) from this page’s links.`,
   ];
   if (broken.length > 0) {
     lines.push(
@@ -107,7 +180,7 @@ export async function probeBrokenInternalLinks(
         .join(", ")}${errors.length > 2 ? "…" : ""}).`,
     );
   }
-  if (failN === 0) {
+  if (broken.length === 0 && errors.length === 0) {
     lines.push("No obvious 4xx/5xx responses in this sample.");
   }
 
@@ -136,6 +209,6 @@ export async function probeBrokenInternalLinks(
     score: scoreFromResult(result),
     category: "Crawlability",
     pillar: "SEO",
-    evidence: items.length > 0 ? { totalCount: failN, items } : undefined,
+    evidence: items.length > 0 ? { totalCount: issueCount, items } : undefined,
   };
 }

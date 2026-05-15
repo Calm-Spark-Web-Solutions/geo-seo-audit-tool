@@ -12,6 +12,7 @@ import {
 import { CheckList } from "@/components/audits/CheckList";
 import { AuditPageRow } from "@/components/audits/AuditPageRow";
 import { AuditScoreCard } from "@/components/audits/AuditScoreCard";
+import type { RemoveAuditPageSuccess } from "@/app/(dashboard)/visibility-scans/[id]/pages/[pageId]/actions";
 import { EmptyState } from "@/components/layout/EmptyState";
 import {
   Card,
@@ -366,6 +367,20 @@ export function AuditDetailLive({
                         auditId={audit.id}
                         page={p}
                         prior={priorByUrl?.[p.url]}
+                        removeEnabled={isTerminal(audit.status)}
+                        onRemoved={(rollup: RemoveAuditPageSuccess) => {
+                          setPages((prev) =>
+                            prev.filter((row) => row.id !== p.id),
+                          );
+                          setAudit((prev) => ({
+                            ...prev,
+                            seo_score: rollup.seo_score,
+                            geo_score: rollup.geo_score,
+                            score: rollup.score,
+                            pages_crawled: rollup.pages_crawled,
+                            progress_total: rollup.progress_total,
+                          }));
+                        }}
                       />
                     ))}
                   </div>

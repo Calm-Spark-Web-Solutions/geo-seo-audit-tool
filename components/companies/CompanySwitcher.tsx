@@ -7,6 +7,7 @@ import { ChevronsUpDown, Plus } from "lucide-react";
 
 import { Avatar, initialsFor } from "@/components/ui/avatar";
 import { selectedOrganizationId } from "@/lib/active-company";
+import { setActiveOrgCookie } from "@/lib/active-org-cookie";
 import { cn } from "@/lib/utils";
 import type { Company } from "@/types";
 
@@ -14,19 +15,26 @@ interface Props {
   companies: Company[];
   /** Narrow sidebar: avatar-only trigger; menu opens to the right. */
   collapsed?: boolean;
+  activeOrganizationIdCookie: string | null;
   onNavigate?: () => void;
 }
 
 export function CompanySwitcher({
   companies,
   collapsed = false,
+  activeOrganizationIdCookie,
   onNavigate,
 }: Props) {
   const params = useParams<{ id?: string | string[] }>();
   const pathname = usePathname();
   const detailsRef = useRef<HTMLDetailsElement>(null);
 
-  const selectedId = selectedOrganizationId(companies, params, pathname);
+  const selectedId = selectedOrganizationId(
+    companies,
+    params,
+    pathname,
+    activeOrganizationIdCookie,
+  );
   const selected = selectedId
     ? companies.find((c) => c.id === selectedId) ?? null
     : null;
@@ -101,8 +109,9 @@ export function CompanySwitcher({
               return (
                 <Link
                   key={company.id}
-                  href={`/companies/${company.id}`}
+                  href={`/dashboard?org=${encodeURIComponent(company.id)}`}
                   onClick={() => {
+                    void setActiveOrgCookie(company.id);
                     detailsRef.current?.removeAttribute("open");
                     onNavigate?.();
                   }}

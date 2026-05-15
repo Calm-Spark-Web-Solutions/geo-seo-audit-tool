@@ -1,4 +1,7 @@
-import { boundedText } from "@/lib/security/bounded-fetch";
+import axios from "axios";
+
+import { devRunnerConsole } from "@/lib/audit/dev-runner-console";
+import { observabilityLog } from "@/lib/observability/log";
 import { assertSafeUrl } from "@/lib/security/ssrf";
 
 import {
@@ -33,12 +36,46 @@ export interface FetchPageWithMetaResult {
   meta: PageFetchMeta;
 }
 
-function headersToRecord(h: Headers): Record<string, string> {
-  const out: Record<string, string> = {};
-  h.forEach((value, key) => {
-    out[key.toLowerCase()] = value;
+function safeHostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function safePathnameDev(url: string): string | undefined {
+  if (process.env.NODE_ENV !== "development") return undefined;
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Structured diagnosis when HTML fetch gives up (no secrets / minimal PII). */
+function logAuditFetchFailure(args: {
+  requestUrl: string;
+  reason: string;
+  status?: number;
+  contentType?: string;
+}): void {
+  const hostname = safeHostname(args.requestUrl);
+  observabilityLog.warn("audit.fetch.page_failed", {
+    hostname,
+    reason: args.reason,
+    ...(args.status !== undefined ? { httpStatus: args.status } : {}),
+    ...(args.contentType !== undefined
+      ? { contentTypePrefix: args.contentType.slice(0, 120) }
+      : {}),
   });
-  return out;
+  const pathnameDev = safePathnameDev(args.requestUrl);
+  devRunnerConsole("fetchPageWithMeta failed", {
+    hostname,
+    reason: args.reason,
+    httpStatus: args.status,
+    ...(pathnameDev !== undefined ? { pathname: pathnameDev } : {}),
+  });
 }
 
 /**
@@ -56,63 +93,92 @@ export async function fetchPageWithMeta(
   const chain: { url: string; status: number }[] = [];
   let current = startUrl;
   const visited = new Set<string>();
-  let redirectLoop = false;
 
   try {
     await assertSafeUrl(startUrl);
   } catch {
+    logAuditFetchFailure({
+      requestUrl: startUrl,
+      reason: "ssrf_guard_rejected",
+    });
     return null;
   }
 
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
     if (Date.now() > deadline) {
+      logAuditFetchFailure({
+        requestUrl: current,
+        reason: "deadline_exceeded",
+      });
       return null;
     }
 
     try {
       await assertSafeUrl(current);
     } catch {
+      logAuditFetchFailure({
+        requestUrl: current,
+        reason: "ssrf_guard_rejected",
+      });
       return null;
     }
 
     if (visited.has(current)) {
-      redirectLoop = true;
-      break;
+      logAuditFetchFailure({
+        requestUrl: current,
+        reason: "redirect_chain_duplicate",
+      });
+      return null;
     }
     visited.add(current);
 
     const hopTimeout = Math.max(800, deadline - Date.now());
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), hopTimeout);
 
-    let res: Response;
+    // Use axios (same HTTP client as the sitemap fetcher) so both share the
+    // same TLS fingerprint. Native fetch (undici) uses a different JA3/JA4
+    // fingerprint that some WAFs/CDNs block at the TCP level before sending
+    // any HTTP response.
+    let res: Awaited<ReturnType<typeof axios.get<string>>>;
     try {
-      res = await fetch(current, {
-        method: "GET",
-        redirect: "manual",
-        signal: ctrl.signal,
+      res = await axios.get<string>(current, {
+        timeout: hopTimeout,
+        maxRedirects: 0,
+        validateStatus: () => true,
+        responseType: "text",
+        maxContentLength: HTML_MAX_BYTES,
         headers: {
           "User-Agent": userAgent,
           Accept: "text/html,application/xhtml+xml",
         },
+        decompress: true,
       });
     } catch {
-      clearTimeout(timer);
+      logAuditFetchFailure({
+        requestUrl: current,
+        reason: "fetch_network_or_abort",
+      });
       return null;
-    } finally {
-      clearTimeout(timer);
     }
 
     const status = res.status;
     chain.push({ url: current, status });
 
     if (status >= 200 && status < 300) {
-      const ct = String(res.headers.get("content-type") ?? "");
+      const ct = String(res.headers["content-type"] ?? "");
       if (!ct.includes("html")) {
+        logAuditFetchFailure({
+          requestUrl: current,
+          reason: "non_html_content_type",
+          status,
+          contentType: ct,
+        });
         return null;
       }
-      const { text } = await boundedText(res, HTML_MAX_BYTES);
-      const responseHeadersLower = headersToRecord(res.headers);
+      const text = typeof res.data === "string" ? res.data : String(res.data ?? "");
+      const responseHeadersLower: Record<string, string> = {};
+      for (const [k, v] of Object.entries(res.headers)) {
+        if (typeof v === "string") responseHeadersLower[k.toLowerCase()] = v;
+      }
       const finalUrl = current;
       const redirectHopCount = Math.max(0, chain.length - 1);
       return {
@@ -121,40 +187,58 @@ export async function fetchPageWithMeta(
           finalUrl,
           redirectHopCount,
           redirectChain: chain,
-          redirectLoop,
+          redirectLoop: false,
           responseHeadersLower,
         },
       };
     }
 
     if (REDIRECT_STATUSES.has(status)) {
-      const loc = res.headers.get("location")?.trim();
-      try {
-        await res.arrayBuffer();
-      } catch {
-        // ignore body drain errors
-      }
+      const loc = (res.headers["location"] as string | undefined)?.trim();
       if (!loc) {
+        logAuditFetchFailure({
+          requestUrl: current,
+          reason: "redirect_missing_location",
+          status,
+        });
         return null;
       }
       let next: string;
       try {
         next = new URL(loc, current).href;
       } catch {
+        logAuditFetchFailure({
+          requestUrl: current,
+          reason: "redirect_location_invalid",
+          status,
+        });
         return null;
       }
       if (visited.has(next)) {
-        redirectLoop = true;
         chain.push({ url: next, status: 0 });
+        logAuditFetchFailure({
+          requestUrl: next,
+          reason: "redirect_target_revisit",
+          status,
+        });
         return null;
       }
       current = next;
       continue;
     }
 
+    logAuditFetchFailure({
+      requestUrl: current,
+      reason: "http_non_success",
+      status,
+    });
     return null;
   }
 
+  logAuditFetchFailure({
+    requestUrl: startUrl,
+    reason: "redirect_max_hops_exceeded",
+  });
   return null;
 }
 

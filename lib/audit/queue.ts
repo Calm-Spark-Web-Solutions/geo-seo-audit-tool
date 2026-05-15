@@ -123,6 +123,22 @@ async function finalizeCancelled(
     .eq("id", jobId);
 }
 
+/** Audit row is already `failed` (e.g. markAuditFailed inside runAudit). Close the job without retry. */
+async function finalizeJobFailed(
+  supabase: SupabaseClient,
+  jobId: string,
+): Promise<void> {
+  await supabase
+    .from("audit_jobs")
+    .update({
+      status: "failed",
+      lease_until: null,
+      last_error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+}
+
 async function finalizeErrored(
   supabase: SupabaseClient,
   job: JobRow,
@@ -211,12 +227,14 @@ async function runJob(
     await runAudit({ supabase, auditId: job.audit_id, websiteUrl });
     // Trust the post-run audits.status: runAudit sets `complete` on success,
     // returns early without flipping status when it observes `cancelled`,
-    // and may have set `failed` itself on a bad URL.
+    // and sets `failed` (without throwing) for outcomes like all-fetch-failed.
     const status = await readAuditStatus(supabase, job.audit_id);
     if (status === "cancelled") {
       await finalizeCancelled(supabase, job.id);
     } else if (status === "complete") {
       await finalizeCompleted(supabase, job.id);
+    } else if (status === "failed") {
+      await finalizeJobFailed(supabase, job.id);
     } else {
       // Defensive: runAudit returned without throwing, but didn't reach a
       // terminal status. Treat as an error so retry kicks in.
