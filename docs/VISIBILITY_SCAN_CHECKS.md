@@ -60,7 +60,6 @@ Deterministic parsing of each fetched page’s HTML (no browser). Checks are spl
 | `internal_links` | Internal links |
 | `entity_consistency` | Entity consistency |
 | `lists_and_qa` | Lists and Q&A |
-| `images_with_captions` | Images with captions |
 
 **Offline JSON-LD heuristics** (`structuredDataOfflineHeuristics` in `lib/scoring/schema-heuristic.ts`, merged into GEO checks when JSON-LD blocks exist)
 
@@ -76,7 +75,20 @@ Deterministic parsing of each fetched page’s HTML (no browser). Checks are spl
 
 ### Internal link probes (`lib/scoring/broken-internal-links.ts`)
 
-**Requires** the audit runner HTML fetch path (same as visibility scans). Bounded HEAD/GET sample of same-origin links from each page.
+**Requires** the audit runner HTML fetch path (same as visibility scans).
+
+**Methodology**
+
+- Collect up to **18** unique **same-origin** URLs from `<a href>` while parsing the page HTML (`MAX_PROBE_TARGETS` in `deterministic.ts`).
+- For each URL: send **HEAD** with the same **`User-Agent`** as the main crawler (`DEFAULT_USER_AGENT` in `lib/crawler/normalize.ts`) plus **`Referer`** set to the audited page URL.
+- **HEAD → GET** fallback when HEAD returns **405**, **501**, **401**, or **403**, or when HEAD **throws** (network/timeout): one bounded **GET** (5 s timeout, body read capped at 64 KiB via `boundedText`).
+- Responses with status **≥ 400** after the final method count as **broken** (confirmed HTTP error). SSRF guard failures, timeouts, and remaining fetch failures count as **could not be checked** (scanner inconclusive—not proof the link is broken for browsers).
+
+**Pass / warn / fail**
+
+- **Fail**: **≥ 2** sampled URLs returned confirmed HTTP errors (**≥ 400**).
+- **Warn**: exactly **1** HTTP error, **or** any count of **could not be checked** (including many probe failures).
+- **Pass**: no HTTP errors and no probe failures.
 
 | Key | Label (UI) |
 |-----|------------|

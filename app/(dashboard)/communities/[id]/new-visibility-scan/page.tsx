@@ -142,8 +142,8 @@ export default async function NewAuditPage({
         description={
           <span className="text-muted-foreground">
             Pick which sitemap categories and URLs to include. Each page is
-            scored with deterministic checks plus PSI and Anthropic
-            commentary, so larger runs take proportionally longer.
+            scored with deterministic checks plus PSI, so larger runs take
+            proportionally longer.
           </span>
         }
       />

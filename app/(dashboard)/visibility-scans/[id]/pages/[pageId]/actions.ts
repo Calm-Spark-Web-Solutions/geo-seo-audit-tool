@@ -3,12 +3,16 @@
 import { revalidatePath } from "next/cache";
 
 import { recalculateAuditRollupScores } from "@/lib/audit/rollup-scores";
+import { consumeRateLimit } from "@/lib/ratelimit";
 import {
   mergeFixesFromAllChecks,
   overallPageScoreFromChecks,
 } from "@/lib/scoring/effective-scores";
 import { createClient } from "@/lib/supabase/server";
 import type { AuditCheck } from "@/types";
+
+const PAGE_REMOVE_MAX = 30;
+const PAGE_REMOVE_WINDOW_S = 60;
 
 async function revalidateAuditPaths(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -27,6 +31,135 @@ async function revalidateAuditPaths(
 }
 
 export type ScoreActionResult = { ok: boolean; error?: string };
+
+export type RemoveAuditPageSuccess = {
+  seo_score: number | null;
+  geo_score: number | null;
+  score: number | null;
+  pages_crawled: number;
+  progress_total: number;
+};
+
+export type RemoveAuditPageResult =
+  | ({ ok: true } & RemoveAuditPageSuccess)
+  | { ok: false; error: string };
+
+export async function removeAuditPageFromScan(
+  auditId: string,
+  pageId: string,
+): Promise<RemoveAuditPageResult> {
+  if (typeof auditId !== "string" || !auditId) {
+    return { ok: false, error: "Missing audit id." };
+  }
+  if (typeof pageId !== "string" || !pageId) {
+    return { ok: false, error: "Missing page id." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  const allowed = await consumeRateLimit(
+    supabase,
+    `audit_page_remove:${user.id}`,
+    PAGE_REMOVE_MAX,
+    PAGE_REMOVE_WINDOW_S,
+  );
+  if (!allowed) {
+    return {
+      ok: false,
+      error: "Too many requests. Please wait a moment and try again.",
+    };
+  }
+
+  const { data: auditRow, error: auditErr } = await supabase
+    .from("audits")
+    .select("id, status")
+    .eq("id", auditId)
+    .maybeSingle();
+
+  if (auditErr || !auditRow) {
+    return { ok: false, error: "Visibility scan not found or no access." };
+  }
+
+  const status = auditRow.status as string;
+  if (status === "pending" || status === "running") {
+    return {
+      ok: false,
+      error: "Wait until the scan finishes before removing pages.",
+    };
+  }
+
+  const { count: pageCount, error: countErr } = await supabase
+    .from("audit_pages")
+    .select("*", { count: "exact", head: true })
+    .eq("audit_id", auditId);
+
+  if (countErr) {
+    return { ok: false, error: countErr.message };
+  }
+  if ((pageCount ?? 0) < 2) {
+    return {
+      ok: false,
+      error: "Cannot remove the last page from this scan.",
+    };
+  }
+
+  const { data: deleted, error: delErr } = await supabase
+    .from("audit_pages")
+    .delete()
+    .eq("id", pageId)
+    .eq("audit_id", auditId)
+    .select("id");
+
+  if (delErr) {
+    return { ok: false, error: delErr.message };
+  }
+  if (!deleted?.length) {
+    return { ok: false, error: "That page was not found on this scan." };
+  }
+
+  await recalculateAuditRollupScores(supabase, auditId);
+
+  const remaining = (pageCount ?? 0) - 1;
+  const { error: upErr } = await supabase
+    .from("audits")
+    .update({
+      pages_crawled: remaining,
+      progress_total: remaining,
+    })
+    .eq("id", auditId);
+
+  if (upErr) {
+    return { ok: false, error: upErr.message };
+  }
+
+  const { data: scored, error: readErr } = await supabase
+    .from("audits")
+    .select("seo_score, geo_score, score, pages_crawled, progress_total")
+    .eq("id", auditId)
+    .maybeSingle();
+
+  if (readErr || !scored) {
+    return {
+      ok: false,
+      error: readErr?.message ?? "Could not reload scan totals.",
+    };
+  }
+
+  await revalidateAuditPaths(supabase, auditId, pageId);
+
+  return {
+    ok: true,
+    seo_score: scored.seo_score as number | null,
+    geo_score: scored.geo_score as number | null,
+    score: scored.score as number | null,
+    pages_crawled: scored.pages_crawled as number,
+    progress_total: scored.progress_total as number,
+  };
+}
 
 export async function setAuditPageExcludeFromRollup(
   auditId: string,

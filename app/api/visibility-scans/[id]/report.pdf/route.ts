@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { userAllowedPaidProductFeatures } from "@/lib/billing/subscription-access";
+import type { PdfReportVariant } from "@/lib/pdf/report";
 import { loadAuditPdfPayload, renderAuditPdfBuffer } from "@/lib/pdf/render";
 import { createClient } from "@/lib/supabase/server";
 import { isStripeConfigured } from "@/lib/stripe/server";
@@ -12,8 +13,14 @@ export const maxDuration = 30;
 // See lib/config/region.ts for region options.
 export const preferredRegion = "iad1";
 
+function pdfVariantFromSearchParams(searchParams: URLSearchParams): PdfReportVariant {
+  const raw = (searchParams.get("variant") ?? "").trim().toLowerCase();
+  if (raw === "seo" || raw === "geo" || raw === "full") return raw;
+  return "full";
+}
+
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params;
@@ -47,9 +54,14 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const url = new URL(request.url);
+  const pdfVariant = pdfVariantFromSearchParams(url.searchParams);
+  const filenameSuffix =
+    pdfVariant === "seo" ? "-seo" : pdfVariant === "geo" ? "-geo" : "";
+
   let buffer: Buffer;
   try {
-    buffer = await renderAuditPdfBuffer(payload);
+    buffer = await renderAuditPdfBuffer(payload, { variant: pdfVariant });
   } catch (err) {
     // The user message stays generic, but the underlying cause is logged
     // server-side so Turbopack/Node bundling regressions stop being silent.
@@ -68,7 +80,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="visibility-scan-${id}.pdf"`,
+      "Content-Disposition": `attachment; filename="visibility-scan-${id}${filenameSuffix}.pdf"`,
       "Cache-Control": "no-store",
     },
   });

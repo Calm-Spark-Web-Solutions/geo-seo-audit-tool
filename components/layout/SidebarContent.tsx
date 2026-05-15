@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { LayoutDashboard, PanelLeft, PanelLeftClose } from "lucide-react";
 
 import { CompanySwitcher } from "@/components/companies/CompanySwitcher";
 import { Brand } from "@/components/layout/Brand";
+import { selectedOrganizationId } from "@/lib/active-company";
 import { SidebarAccountSection } from "@/components/layout/SidebarAccountSection";
 import { SidebarAdminLinks } from "@/components/layout/SidebarAdminLinks";
 import { SidebarCompaniesList } from "@/components/layout/SidebarCompaniesList";
@@ -21,19 +22,36 @@ export function SidebarContent({
   companies,
   account,
   quota,
+  activeOrganizationIdCookie,
   onNavigate,
   variant = "desktop",
 }: {
   companies: Company[];
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
+  activeOrganizationIdCookie: string | null;
   onNavigate?: () => void;
   variant?: "desktop" | "mobile";
 }) {
   const pathname = usePathname();
+  const params = useParams<{ id?: string | string[] }>();
   const { collapsed, toggleCollapsed } = useSidebarCollapsed();
   const isMobile = variant === "mobile";
   const railCollapsed = !isMobile && collapsed;
+
+  // Embed the currently-selected org in the Dashboard link so the page always
+  // knows which org to scope to — no cookie ambiguity.
+  const activeOrgId = selectedOrganizationId(
+    companies,
+    params,
+    pathname,
+    activeOrganizationIdCookie,
+  );
+  const dashboardHref = activeOrgId
+    ? `/dashboard?org=${activeOrgId}`
+    : "/dashboard";
+  const dashboardActive =
+    pathname === "/dashboard" || pathname.startsWith("/dashboard?");
 
   /** Scrollable cap: long community lists scroll; short lists do not push Admin to the bottom of the viewport. */
   const communitiesScrollClass =
@@ -44,7 +62,7 @@ export function SidebarContent({
       <div className="flex shrink-0 flex-col gap-4">
         <div className="flex items-center justify-between gap-2">
           <div className={cn("min-w-0", !railCollapsed && "flex-1")}>
-            <Brand href="/dashboard" iconOnly={railCollapsed} size="sm" />
+            <Brand href={dashboardHref} iconOnly={railCollapsed} size="sm" />
           </div>
           {!isMobile ? (
             <Button
@@ -69,18 +87,20 @@ export function SidebarContent({
         <CompanySwitcher
           companies={companies}
           collapsed={railCollapsed}
+          activeOrganizationIdCookie={activeOrganizationIdCookie}
           onNavigate={onNavigate}
         />
 
         <nav aria-label="Primary">
           <Link
-            href="/dashboard"
+            href={dashboardHref}
             onClick={onNavigate}
+            prefetch={true}
             title={railCollapsed ? "Dashboard" : undefined}
             className={cn(
               "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
               railCollapsed && "justify-center px-2",
-              pathname === "/dashboard"
+              dashboardActive
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
@@ -100,6 +120,7 @@ export function SidebarContent({
         <SidebarCompaniesList
           companies={companies}
           collapsed={railCollapsed}
+          activeOrganizationIdCookie={activeOrganizationIdCookie}
           onNavigate={onNavigate}
         />
       </div>

@@ -11,10 +11,12 @@ export function Sidebar({
   companies,
   account,
   quota,
+  activeOrganizationIdCookie,
 }: {
   companies: Company[];
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
+  activeOrganizationIdCookie: string | null;
 }) {
   const { collapsed, hydrated } = useSidebarCollapsed();
 
@@ -32,6 +34,7 @@ export function Sidebar({
         companies={companies}
         account={account}
         quota={quota}
+        activeOrganizationIdCookie={activeOrganizationIdCookie}
         variant="desktop"
       />
     </aside>

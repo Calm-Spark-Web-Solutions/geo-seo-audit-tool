@@ -6,7 +6,9 @@ import {
   isAuditRunnerConfigured,
   kickAuditRunnerFireAndForget,
 } from "@/lib/audit/runner-kick";
+import { enqueueAudit } from "@/lib/audit/queue";
 import { consumeRateLimit } from "@/lib/ratelimit";
+import { createServiceClient } from "@/lib/supabase/service";
 import { createClient } from "@/lib/supabase/server";
 
 export type RetryRunnerState = {
@@ -63,10 +65,15 @@ export async function retryAuditRunner(
     return { ok: false, error: "Audit not found or you don’t have access." };
   }
 
-  if (audit.status !== "pending" && audit.status !== "running") {
+  const runnable =
+    audit.status === "pending" ||
+    audit.status === "running" ||
+    audit.status === "failed";
+
+  if (!runnable) {
     return {
       ok: false,
-      error: "Audit is not in a runnable state.",
+      error: "Audit is not in a retryable state.",
     };
   }
 
@@ -76,6 +83,19 @@ export async function retryAuditRunner(
       error:
         "Audit runner is not configured. Please contact support.",
     };
+  }
+
+  // For failed audits: reset status to pending, clear progress, and
+  // re-enqueue so the runner can claim a fresh job (the old failed job
+  // won't block this because the unique partial index only covers
+  // status IN ('queued','running')).
+  if (audit.status === "failed") {
+    const serviceClient = createServiceClient();
+    await serviceClient
+      .from("audits")
+      .update({ status: "pending", pages_crawled: 0, progress_total: null })
+      .eq("id", auditId);
+    await enqueueAudit(serviceClient, auditId);
   }
 
   kickAuditRunnerFireAndForget(audit.id);

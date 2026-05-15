@@ -39,6 +39,7 @@ export function AuditScoreCard({
 }) {
   const date = new Date(audit.created_at).toLocaleString();
   const isRunning = audit.status === "pending" || audit.status === "running";
+  const isFailed = audit.status === "failed";
   const progressTotal = audit.progress_total ?? 0;
   const indeterminateProgress = isRunning && progressTotal === 0;
   const retryLikely =
@@ -69,30 +70,47 @@ export function AuditScoreCard({
               <RetryRunnerButton auditId={audit.id} />
               <CancelAuditButton auditId={audit.id} />
             </>
+          ) : isFailed ? (
+            <RetryRunnerButton auditId={audit.id} label="Retry scan" />
           ) : null}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {isRunning && queue?.lastError ? (
+        {/* Error banner: shown during retries (amber) or on hard failure (red) */}
+        {queue?.lastError ? (
           <div
-            role="status"
-            className="flex gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100"
+            role="alert"
+            className={
+              isRunning
+                ? "flex gap-2 rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100"
+                : "flex gap-2 rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground"
+            }
           >
             <AlertTriangle
-              className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400"
+              className={
+                isRunning
+                  ? "mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400"
+                  : "mt-0.5 h-4 w-4 shrink-0 text-destructive"
+              }
               aria-hidden
             />
             <div className="min-w-0 space-y-1">
-              <p className="font-medium">
-                Runner retry — attempt {queue.attempts} of {queue.maxAttempts}
-              </p>
+              {isRunning ? (
+                <p className="font-medium">
+                  Runner retry — attempt {queue.attempts} of {queue.maxAttempts}
+                </p>
+              ) : (
+                <p className="font-medium">Scan failed after {queue.attempts} attempt{queue.attempts === 1 ? "" : "s"}</p>
+              )}
               <p className="text-xs leading-relaxed opacity-90">
                 {queue.lastError}
               </p>
-              <p className="text-xs text-muted-foreground dark:text-amber-200/80">
-                The scan may continue automatically. Use Retry runner if it
-                stays stuck.
-              </p>
+              {isRunning ? (
+                <p className="text-xs text-muted-foreground dark:text-amber-200/80">
+                  The scan may continue automatically. Use Retry runner if it
+                  stays stuck.
+                </p>
+              ) : null}
             </div>
           </div>
         ) : null}

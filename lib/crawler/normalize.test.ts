@@ -4,6 +4,7 @@ import {
   isAssetUrl,
   normalizeUrl,
   originOf,
+  sameAuditSiteOrigin,
   sameOrigin,
 } from "./normalize";
 
@@ -55,10 +56,58 @@ describe("sameOrigin", () => {
     expect(sameOrigin("http://example.com/", "https://example.com/")).toBe(
       false,
     );
+    expect(sameOrigin("https://example.com/", "https://www.example.com/")).toBe(
+      false,
+    );
   });
 
   it("returns false on invalid input", () => {
     expect(sameOrigin("not a url", "https://example.com/")).toBe(false);
+  });
+});
+
+describe("sameAuditSiteOrigin", () => {
+  it("matches apex and www variants with same scheme and port", () => {
+    expect(
+      sameAuditSiteOrigin(
+        "https://example.com/foo",
+        "https://www.example.com/bar",
+      ),
+    ).toBe(true);
+    expect(
+      sameAuditSiteOrigin("https://WWW.Example.COM/", "https://example.com/"),
+    ).toBe(true);
+  });
+
+  it("still rejects real cross-host differences", () => {
+    expect(
+      sameAuditSiteOrigin("https://evil.com/", "https://www.example.com/"),
+    ).toBe(false);
+    expect(
+      sameAuditSiteOrigin("https://blog.example.com/", "https://example.com/"),
+    ).toBe(false);
+  });
+
+  it("accepts http↔https for the same hostname (community stored as http, sitemap returns https)", () => {
+    expect(
+      sameAuditSiteOrigin("http://example.com/", "https://example.com/page"),
+    ).toBe(true);
+    expect(
+      sameAuditSiteOrigin("https://example.com/", "http://example.com/page"),
+    ).toBe(true);
+    expect(
+      sameAuditSiteOrigin("http://www.example.com/", "https://example.com/page"),
+    ).toBe(true);
+  });
+
+  it("rejects port mismatches", () => {
+    expect(
+      sameAuditSiteOrigin("https://example.com/", "https://example.com:8443/"),
+    ).toBe(false);
+  });
+
+  it("returns false on invalid input", () => {
+    expect(sameAuditSiteOrigin("bad", "https://example.com/")).toBe(false);
   });
 });
 

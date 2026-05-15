@@ -10,7 +10,7 @@ import {
   isAssetUrl,
   normalizeUrl,
   originOf,
-  sameOrigin,
+  sameAuditSiteOrigin,
 } from "./normalize";
 import { describeShard } from "./shard-labels";
 
@@ -135,7 +135,7 @@ export async function fetchSitemapShards(
       if (parsed.sitemapindex?.sitemap) {
         for (const entry of parsed.sitemapindex.sitemap) {
           const loc = normalizeUrl(extractLoc(entry) ?? "", level[i]);
-          if (loc && sameOrigin(origin, loc)) nextFrontier.push(loc);
+          if (loc && sameAuditSiteOrigin(origin, loc)) nextFrontier.push(loc);
         }
         continue;
       }
@@ -170,7 +170,7 @@ export async function fetchSitemapShards(
     for (const entry of parsed.urlset.url) {
       const loc = normalizeUrl(extractLoc(entry) ?? "", shardUrl);
       if (!loc) continue;
-      if (!sameOrigin(origin, loc)) continue;
+      if (!sameAuditSiteOrigin(origin, loc)) continue;
       if (isAssetUrl(loc)) continue;
       if (seen.has(loc)) continue;
       seen.add(loc);
@@ -235,7 +235,7 @@ export async function fetchUrlsFromShards(
     const chunk = shardUrls.slice(i, i + SITEMAP_CONCURRENCY);
 
     const xmls = await pAll(chunk, SITEMAP_CONCURRENCY, async (u) =>
-      sameOrigin(origin, u) ? safeFetch(u, settings) : null,
+      sameAuditSiteOrigin(origin, u) ? safeFetch(u, settings) : null,
     );
 
     for (let j = 0; j < chunk.length; j += 1) {
@@ -250,7 +250,7 @@ export async function fetchUrlsFromShards(
         if (collected.length >= max) break;
         const loc = normalizeUrl(extractLoc(entry) ?? "", shardUrl);
         if (!loc) continue;
-        if (!sameOrigin(origin, loc)) continue;
+        if (!sameAuditSiteOrigin(origin, loc)) continue;
         if (isAssetUrl(loc)) continue;
         if (seen.has(loc)) continue;
         seen.add(loc);
@@ -303,7 +303,7 @@ export async function buildUrlToSitemapCategoryLabelMap(
     const chunk = shardUrls.slice(i, i + SITEMAP_CONCURRENCY);
 
     const xmls = await pAll(chunk, SITEMAP_CONCURRENCY, async (u) =>
-      sameOrigin(origin, u) ? safeFetch(u, settings) : null,
+      sameAuditSiteOrigin(origin, u) ? safeFetch(u, settings) : null,
     );
 
     for (let j = 0; j < chunk.length; j += 1) {
@@ -318,7 +318,7 @@ export async function buildUrlToSitemapCategoryLabelMap(
       for (const entry of parsed.urlset.url) {
         const loc = normalizeUrl(extractLoc(entry) ?? "", shardUrl);
         if (!loc) continue;
-        if (!sameOrigin(origin, loc)) continue;
+        if (!sameAuditSiteOrigin(origin, loc)) continue;
         if (isAssetUrl(loc)) continue;
         if (neededUrls !== undefined && !neededUrls.has(loc)) continue;
         if (out.has(loc)) continue;
@@ -385,7 +385,7 @@ export async function fetchSitemap(
           const loc = normalizeUrl(extractLoc(entry) ?? "", level[i]);
           // Same-origin guard: only follow nested sitemap shards on the
           // crawl base origin so we don't fan out to third-party hosts.
-          if (loc && sameOrigin(origin, loc)) nextFrontier.push(loc);
+          if (loc && sameAuditSiteOrigin(origin, loc)) nextFrontier.push(loc);
         }
         continue;
       }
@@ -394,7 +394,7 @@ export async function fetchSitemap(
         for (const entry of parsed.urlset.url) {
           if (collected.size >= max) break;
           const loc = normalizeUrl(extractLoc(entry) ?? "", level[i]);
-          if (loc && sameOrigin(origin, loc) && !isAssetUrl(loc)) {
+          if (loc && sameAuditSiteOrigin(origin, loc) && !isAssetUrl(loc)) {
             collected.add(loc);
           }
         }
@@ -425,7 +425,7 @@ async function discoverSitemaps(
         // and the SSRF guard would then have to catch it; rejecting
         // off-origin entries up-front is simpler and matches the
         // sitemap-index follow rules elsewhere in this file.
-        if (url && sameOrigin(origin, url)) found.add(url);
+        if (url && sameAuditSiteOrigin(origin, url)) found.add(url);
       }
     }
   }

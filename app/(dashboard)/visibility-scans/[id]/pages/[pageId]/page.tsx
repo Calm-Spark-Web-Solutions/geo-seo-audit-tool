@@ -9,7 +9,6 @@ import {
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { AiCommentaryCard } from "@/components/audits/AiCommentaryCard";
 import { AuditPageRollupExclusion } from "@/components/audits/AuditPageRollupExclusion";
 import { ChecksCategoryBreakdown } from "@/components/audits/ChecksCategoryBreakdown";
 import type { CategoryStat } from "@/components/audits/ChecksCategoryBreakdown";
@@ -122,7 +121,7 @@ export default async function AuditPageDetailPage({
     supabase
       .from("audit_pages")
       .select(
-        "id, audit_id, url, score, seo_results, geo_results, fixes, manual_notes, ai_comment, exclude_from_audit_score, created_at",
+        "id, audit_id, url, score, seo_results, geo_results, fixes, manual_notes, exclude_from_audit_score, created_at",
       )
       .eq("id", pageId)
       .eq("audit_id", auditId)
@@ -291,11 +290,6 @@ export default async function AuditPageDetailPage({
         current={{ seo_results: seo, geo_results: geo }}
         prior={prior}
       />
-
-      {/* AI-generated page analysis */}
-      {typedPage.ai_comment ? (
-        <AiCommentaryCard comment={typedPage.ai_comment} />
-      ) : null}
 
       {/* Category breakdown — replaces the old pillar summary */}
       <ChecksCategoryBreakdown

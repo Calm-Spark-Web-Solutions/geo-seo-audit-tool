@@ -9,9 +9,56 @@ const nextConfig: NextConfig = {
   // to runtime require(), which is what the library expects.
   serverExternalPackages: ["@react-pdf/renderer"],
 
+  experimental: {
+    // Tree-shake icon and component libraries — only the symbols actually
+    // imported are bundled. Reduces the JS sent per route, speeding up
+    // navigation on first and subsequent visits.
+    optimizePackageImports: [
+      "lucide-react",
+      "@radix-ui/react-icons",
+      "recharts",
+    ],
+  },
+
   // Required for Sentry browser profiling (JS Self Profiling API).
   async headers() {
     return [
+      // Cloudflare sits in front of Vercel for this deployment. These headers
+      // tell Cloudflare's edge what to cache and for how long.
+      //
+      // Dashboard and app pages contain user-specific data — mark them
+      // private so Cloudflare never caches them at the edge. The (dashboard)
+      // route group is a folder convention; actual URLs start with /dashboard,
+      // /communities, /companies, /visibility-scans, /settings.
+      {
+        source: "/:path(dashboard|communities|companies|visibility-scans|settings)/:rest*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+      {
+        source: "/:path(dashboard|communities|companies|visibility-scans|settings)",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+      // API routes that drive live scan status or user data should also not
+      // be cached by Cloudflare.
+      {
+        source: "/api/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+      // Static Next.js assets are content-addressed (hashed filenames) so
+      // they can be cached aggressively at every layer.
+      {
+        source: "/_next/static/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+      // Sentry profiling header — required for JS Self Profiling API.
       {
         source: "/:path*",
         headers: [{ key: "Document-Policy", value: "js-profiling" }],

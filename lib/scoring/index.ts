@@ -100,7 +100,7 @@ export async function scoreAndAnalyzePage({
           geoChecks: det.geoChecks,
           fixes: det.fixes,
         }),
-    probeBrokenInternalLinks(det.internalLinkTargets),
+    probeBrokenInternalLinks(det.internalLinkTargets, url),
   ]);
 
   const seoChecks: AuditCheck[] = [...det.seoChecks, ...psi.seo, brokenCheck];

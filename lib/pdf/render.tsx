@@ -2,7 +2,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { COMMUNITY_MANUAL_ITEMS } from "@/lib/checklists/community-manual";
-import { AuditReportPdfDocument } from "@/lib/pdf/report";
+import { AuditReportPdfDocument, type PdfReportVariant } from "@/lib/pdf/report";
 import type {
   Audit,
   AuditPage,
@@ -107,7 +107,9 @@ export async function loadAuditPdfPayload(
  */
 export async function renderAuditPdfBuffer(
   payload: AuditPdfPayload,
+  options?: { variant?: PdfReportVariant },
 ): Promise<Buffer> {
+  const variant = options?.variant ?? "full";
   return renderToBuffer(
     <AuditReportPdfDocument
       audit={payload.audit}
@@ -116,6 +118,7 @@ export async function renderAuditPdfBuffer(
       pages={payload.pages}
       siteWideChecks={payload.siteWideChecks}
       cruxFieldChecks={payload.cruxFieldChecks}
+      variant={variant}
     />,
   );
 }

@@ -16,10 +16,12 @@ type CommunityRow = { id: string; name: string };
 export function SidebarCompaniesList({
   companies,
   collapsed,
+  activeOrganizationIdCookie,
   onNavigate,
 }: {
   companies: Company[];
   collapsed: boolean;
+  activeOrganizationIdCookie: string | null;
   onNavigate?: () => void;
 }) {
   const params = useParams<{ id?: string | string[] }>();
@@ -28,6 +30,7 @@ export function SidebarCompaniesList({
     companies,
     params,
     pathname,
+    activeOrganizationIdCookie,
   );
 
   const [rows, setRows] = useState<CommunityRow[] | null>(null);

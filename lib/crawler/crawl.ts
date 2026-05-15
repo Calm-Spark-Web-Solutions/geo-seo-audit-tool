@@ -7,7 +7,7 @@ import {
   MAX_PAGES,
   isAssetUrl,
   normalizeUrl,
-  sameOrigin,
+  sameAuditSiteOrigin,
 } from "./normalize";
 
 interface CrawlOptions {
@@ -51,7 +51,7 @@ export async function crawlSite(
       if (!href) return;
       const next = normalizeUrl(href, current);
       if (!next) return;
-      if (!sameOrigin(start, next)) return;
+      if (!sameAuditSiteOrigin(start, next)) return;
       if (isAssetUrl(next)) return;
       if (seen.has(next)) return;
       seen.add(next);

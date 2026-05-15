@@ -83,9 +83,14 @@ export function PdfActions({
         <div className="flex flex-col">
           <span className="text-sm font-medium">PDF report</span>
           <span className="text-xs text-muted-foreground">
-            {showSaved && generatedLabel
-              ? `Last saved ${generatedLabel}`
-              : "Download a fresh PDF or save it to storage for sharing."}
+            Full, SEO-only, or GEO-only PDF downloads. Saving to storage keeps the
+            combined report only for signed URLs.
+            {showSaved && generatedLabel ? (
+              <>
+                {" "}
+                Last saved {generatedLabel}.
+              </>
+            ) : null}
           </span>
         </div>
       ) : null}
@@ -98,7 +103,29 @@ export function PdfActions({
             rel="noopener noreferrer"
           >
             <Download className="h-4 w-4" aria-hidden />
-            Download PDF
+            Full report
+          </a>
+        </Button>
+
+        <Button asChild size="sm" variant="outline">
+          <a
+            href={`/api/visibility-scans/${auditId}/report.pdf?variant=seo`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Download className="h-4 w-4" aria-hidden />
+            SEO PDF
+          </a>
+        </Button>
+
+        <Button asChild size="sm" variant="outline">
+          <a
+            href={`/api/visibility-scans/${auditId}/report.pdf?variant=geo`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <Download className="h-4 w-4" aria-hidden />
+            GEO PDF
           </a>
         </Button>
 
