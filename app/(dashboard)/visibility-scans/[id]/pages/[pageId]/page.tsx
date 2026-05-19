@@ -196,9 +196,9 @@ export default async function AuditPageDetailPage({
     linksEvidence
       ? {
           icon: LinkIcon,
-          label: "Internal links",
+          label: "In-content links",
           value: linksEvidence.evidence.totalCount ?? 0,
-          suffix: "captured",
+          suffix: "in body",
           href: `${basePath}/inspectors/links`,
         }
       : null,

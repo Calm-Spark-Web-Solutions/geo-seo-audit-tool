@@ -6,7 +6,7 @@ import type Stripe from "stripe";
 import {
   COMMUNITY_QUANTITY_HARD_MAX,
   COMMUNITY_QUANTITY_HARD_MIN,
-  PACK_PRICING,
+  maxAddonPacksPerCommunity,
 } from "@/lib/billing/plan-limits";
 import {
   getStripePriceId,
@@ -97,14 +97,18 @@ export async function startCheckoutSession(formData: FormData) {
           1,
         );
 
+  const maxPacks = maxAddonPacksPerCommunity(priceKey);
+
   // Optional Page Pack add-on. `pagesPackQuantity` is **packs per community**;
   // Stripe's `line_items[].quantity` for the pack price is
   // `packsPerCommunity × communities`, since each unit on the Stripe Price
   // is `unit_amount` for "+1 pack on +1 community".
+  const packsUpper =
+    maxPacks === null ? 9_999 : maxPacks;
   const packsPerCommunity = parseInteger(
     formData.get("pagesPackQuantity"),
     0,
-    PACK_PRICING.hardMaxPacksPerCommunity,
+    packsUpper,
     0,
   );
   const packPriceKey =
@@ -140,7 +144,9 @@ export async function startCheckoutSession(formData: FormData) {
   // session would create a SECOND Stripe subscription (and a duplicate
   // charge on next renewal). Send the user to the Customer Portal so any
   // quantity / tier / Page Pack changes apply to the existing sub with
-  // Stripe-managed proration.
+  // Stripe-managed proration. Run Packs are not sold via Checkout; customers
+  // raise manual audit capacity by upgrading tiers or via the portal if legacy
+  // items exist.
   if (
     existing?.stripe_customer_id &&
     existing?.status &&
@@ -167,8 +173,10 @@ export async function startCheckoutSession(formData: FormData) {
     client_reference_id: user.id,
     metadata: { supabase_user_id: user.id },
     subscription_data: {
+      trial_period_days: 14,
       metadata: { supabase_user_id: user.id },
     },
+    payment_method_collection: "if_required",
     ...(existing?.stripe_customer_id
       ? { customer: existing.stripe_customer_id }
       : { customer_email: user.email ?? undefined }),

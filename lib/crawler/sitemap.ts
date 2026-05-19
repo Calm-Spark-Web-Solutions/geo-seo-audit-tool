@@ -12,6 +12,7 @@ import {
   originOf,
   sameAuditSiteOrigin,
 } from "./normalize";
+import { mapWithConcurrency } from "./concurrency";
 import { describeShard } from "./shard-labels";
 
 const COMMON_SITEMAP_PATHS = [
@@ -29,31 +30,6 @@ const COMMON_SITEMAP_PATHS = [
  * concurrency would hurt user-facing pages on shared infrastructure.
  */
 const SITEMAP_CONCURRENCY = 5;
-
-/**
- * Run `fn` over `items` with at most `limit` calls in flight at once.
- * Order of `results` matches the input order. Errors propagate; callers
- * (here: `safeFetch` / `safeParse`) already swallow per-fetch failures.
- */
-async function pAll<T, R>(
-  items: ReadonlyArray<T>,
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let cursor = 0;
-  const workerCount = Math.max(1, Math.min(limit, items.length));
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const idx = cursor;
-      cursor += 1;
-      if (idx >= items.length) return;
-      results[idx] = await fn(items[idx], idx);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -121,7 +97,7 @@ export async function fetchSitemapShards(
     const level = frontier.filter((u) => !visited.has(u));
     for (const u of level) visited.add(u);
 
-    const xmls = await pAll(level, SITEMAP_CONCURRENCY, (u) =>
+    const xmls = await mapWithConcurrency(level, SITEMAP_CONCURRENCY, (u) =>
       safeFetch(u, settings),
     );
 
@@ -153,7 +129,7 @@ export async function fetchSitemapShards(
   // Fetch leaves in parallel (bounded). Each leaf is a `urlset` xml; we
   // walk the entries in-process to build the shard summary.
   const leafUrls = Array.from(leafShards);
-  const leafXmls = await pAll(leafUrls, SITEMAP_CONCURRENCY, (u) =>
+  const leafXmls = await mapWithConcurrency(leafUrls, SITEMAP_CONCURRENCY, (u) =>
     safeFetch(u, settings),
   );
 
@@ -234,7 +210,7 @@ export async function fetchUrlsFromShards(
     if (collected.length >= max) break;
     const chunk = shardUrls.slice(i, i + SITEMAP_CONCURRENCY);
 
-    const xmls = await pAll(chunk, SITEMAP_CONCURRENCY, async (u) =>
+    const xmls = await mapWithConcurrency(chunk, SITEMAP_CONCURRENCY, async (u) =>
       sameAuditSiteOrigin(origin, u) ? safeFetch(u, settings) : null,
     );
 
@@ -302,7 +278,7 @@ export async function buildUrlToSitemapCategoryLabelMap(
   for (let i = 0; i < shardUrls.length; i += SITEMAP_CONCURRENCY) {
     const chunk = shardUrls.slice(i, i + SITEMAP_CONCURRENCY);
 
-    const xmls = await pAll(chunk, SITEMAP_CONCURRENCY, async (u) =>
+    const xmls = await mapWithConcurrency(chunk, SITEMAP_CONCURRENCY, async (u) =>
       sameAuditSiteOrigin(origin, u) ? safeFetch(u, settings) : null,
     );
 
@@ -369,7 +345,7 @@ export async function fetchSitemap(
     const level = frontier.filter((u) => !visited.has(u));
     for (const u of level) visited.add(u);
 
-    const xmls = await pAll(level, SITEMAP_CONCURRENCY, (u) =>
+    const xmls = await mapWithConcurrency(level, SITEMAP_CONCURRENCY, (u) =>
       safeFetch(u, settings),
     );
 

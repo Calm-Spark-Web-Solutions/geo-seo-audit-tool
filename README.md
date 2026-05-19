@@ -41,8 +41,7 @@ A full-stack web application (**RankLume**) for AI-powered SEO and GEO (Generati
 │   │   │   ├── [id]/page.tsx             # Community detail + visibility scan history
 │   │   │   └── [id]/new-visibility-scan/page.tsx   # Run new visibility scan
 │   │   └── audits/
-│   │       ├── [id]/page.tsx             # Full visibility scan report
-│   │       └── [id]/export/page.tsx      # PDF export preview
+│   │       └── [id]/page.tsx             # Full visibility scan report (PDF via header)
 │   ├── api/
 │   │   ├── audit/
 │   │   │   ├── start/route.ts            # Kick off audit job
@@ -54,17 +53,11 @@ A full-stack web application (**RankLume**) for AI-powered SEO and GEO (Generati
 │   │       └── pdf/route.ts              # Generate + upload PDF to Supabase Storage
 │   └── layout.tsx
 ├── components/
-│   ├── audit/
-│   │   ├── AuditProgress.tsx             # Realtime progress bar
-│   │   ├── AuditReport.tsx               # Full report display
-│   │   ├── CheckItem.tsx                 # Pass/fail/warn row
-│   │   ├── ScoreCard.tsx                 # Score + pill summary
-│   │   └── FixList.tsx                   # Prioritized fixes
+│   ├── audits/                           # Visibility scan UI
 │   ├── companies/
 │   │   ├── CompanyCard.tsx
 │   │   └── CompanyForm.tsx
 │   ├── communities/
-│   │   ├── CommunityCard.tsx
 │   │   └── CommunityForm.tsx
 │   └── ui/                               # shadcn/ui components
 ├── lib/
@@ -133,6 +126,7 @@ PSI calls add roughly 15–25 s per page; the runner concurrency is capped at 3 
 |---|---|---|
 | Site-wide probes | `audits.site_wide_checks` | Robots.txt, AI bot rules, sitemap discovery — no dedicated key beyond the crawler |
 | Chrome UX Report (CrUX) | `audits.crux_field_checks` | Enable Chrome UX Report API in Google Cloud; `CRUX_API_KEY` optional (falls back to `PSI_API_KEY`) |
+| Google Search Console & GA4 | `audits.google_field_checks`, `audits.google_metrics`, `community_google_metrics_snapshots` | OAuth Web client + APIs enabled; `GOOGLE_OAUTH_*` and `GOOGLE_TOKEN_ENCRYPTION_KEY` in env; connect per organization in Settings. Daily metrics sync cron (`/api/integrations/google/metrics-sync`). **Monthly** cron (`/api/cron/monthly-google-report`, 1st of month 07:00 UTC) refreshes metrics, queues a visibility rerun per mapped community, and emails owners/admins + `contact_email` via **Resend** (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`). |
 | Per-check evidence samples | `audit_pages.seo_results[].evidence`, `geo_results[].evidence` | Inline samples (anchors, missing-alt images, schema @types, failing Lighthouse audits) that power the scan-detail inspectors. Cap per check via `AUDIT_EVIDENCE_MAX_ITEMS` (default `50`, max `500`). |
 
 ### Three kinds of scan findings
@@ -365,8 +359,7 @@ Scan complete
 | `/companies/[id]` | Company detail — communities + scores |
 | `/communities/[id]` | Community detail — visibility scan history + score trend |
 | `/communities/[id]/new-visibility-scan` | Run a new visibility scan |
-| `/visibility-scans/[id]` | Full visibility scan report |
-| `/visibility-scans/[id]/export` | PDF export preview + download |
+| `/visibility-scans/[id]` | Full visibility scan report (PDF download in header) |
 | `/settings` | Account settings, plan, billing portal |
 
 ---
@@ -442,7 +435,9 @@ reads on native `fetch()` (see
 [`lib/security/bounded-fetch.ts`](lib/security/bounded-fetch.ts)), and
 explicit `consumeRateLimit` coverage on every auth + mutation server
 action with IP-keyed buckets for unauthenticated paths via
-[`lib/security/client-ip.ts`](lib/security/client-ip.ts).
+[`lib/security/client-ip.ts`](lib/security/client-ip.ts)).
+
+**Supabase:** Row Level Security (membership-scoped tenants), private PDF storage, guarded service-role routes, and operational checklists are documented in [`docs/security.md`](docs/security.md).
 
 ### Testing
 
@@ -468,6 +463,9 @@ npx vitest run lib/security/ssrf.test.ts
 # Type-check + lint without running tests
 npm run typecheck
 npm run lint
+
+# Unused files / exports (Knip)
+npm run deadcode
 ```
 
 Heavier integration tests of the audit runner against a real Supabase
@@ -562,6 +560,6 @@ remove this row.
 - Score drop alerts — email notification when score falls
 - Competitor comparison — audit two URLs side by side
 - White-label reports — client-branded PDF exports
-- Google Search Console integration — real ranking data
-- Google PageSpeed API — add performance scores
+- Google Search Console / GA4 — OAuth, property mapping, 28-day metrics, and trend charts (see `GOOGLE_OAUTH_*` in `.env.example`)
+- Google PageSpeed API — Lighthouse scores (configure `PSI_API_KEY`)
 - Long-form content templates layered on expert checklist + `manual_notes` (product copy)

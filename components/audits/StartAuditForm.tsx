@@ -193,9 +193,72 @@ export function StartAuditForm({
   const overAllowance = (newPagesPreview?.overBy ?? 0) > 0;
   const submitDisabled = noneSelected || subscriptionBlocked || overAllowance;
 
+  const allowanceSlots =
+    pageRoster && !pageRoster.unlimited && newPagesPreview
+      ? Math.min(
+          Number.isFinite(newPagesPreview.remainingMonthly)
+            ? newPagesPreview.remainingMonthly
+            : Number.POSITIVE_INFINITY,
+          Number.isFinite(newPagesPreview.remainingRoster)
+            ? newPagesPreview.remainingRoster
+            : Number.POSITIVE_INFINITY,
+        )
+      : null;
+
   return (
     <form action={formAction} className="flex flex-col gap-5">
       <input type="hidden" name="community_id" value={communityId} />
+
+      {pageRoster && !pageRoster.unlimited ? (
+        <div
+          role="status"
+          className={
+            overAllowance
+              ? "rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm"
+              : "rounded-lg border border-border bg-card p-4 text-sm"
+          }
+        >
+          <p className="font-medium text-foreground">Pre-scan summary</p>
+          <ul className="mt-2 list-inside list-disc space-y-1 text-muted-foreground">
+            <li>
+              <span className="text-foreground">
+                {selectedTotal.toLocaleString()} URL
+                {selectedTotal === 1 ? "" : "s"}
+              </span>{" "}
+              selected · estimated runtime ~{runtimeLabel}
+            </li>
+            {newPagesPreview ? (
+              <li>
+                <span className="text-foreground">
+                  {newPagesPreview.newCount.toLocaleString()} new
+                </span>{" "}
+                and{" "}
+                <span className="text-foreground">
+                  {newPagesPreview.trackedCount.toLocaleString()} rescans
+                </span>{" "}
+                (rescans do not count toward caps)
+              </li>
+            ) : null}
+            {allowanceSlots !== null && Number.isFinite(allowanceSlots) ? (
+              <li>
+                You can add up to{" "}
+                <span className="font-medium text-foreground">
+                  {allowanceSlots.toLocaleString()}
+                </span>{" "}
+                new page{allowanceSlots === 1 ? "" : "s"} on this plan right
+                now
+                {newPagesPreview && newPagesPreview.overBy > 0 ? (
+                  <span className="text-destructive-foreground">
+                    {" "}
+                    — selection is {newPagesPreview.overBy.toLocaleString()}{" "}
+                    over that limit
+                  </span>
+                ) : null}
+              </li>
+            ) : null}
+          </ul>
+        </div>
+      ) : null}
 
       {subscriptionBlocked ? (
         <div

@@ -4,6 +4,7 @@ import {
   isAssetUrl,
   normalizeUrl,
   originOf,
+  preferTrailingSlashFetchUrl,
   sameAuditSiteOrigin,
   sameOrigin,
 } from "./normalize";
@@ -38,6 +39,23 @@ describe("normalizeUrl", () => {
   it("resolves relative paths against a base", () => {
     expect(normalizeUrl("/page", "https://example.com/dir/")).toBe(
       "https://example.com/page",
+    );
+  });
+});
+
+describe("preferTrailingSlashFetchUrl", () => {
+  it("adds trailing slash for non-root paths", () => {
+    expect(preferTrailingSlashFetchUrl("https://example.com/gallery")).toBe(
+      "https://example.com/gallery/",
+    );
+  });
+
+  it("leaves root and already-slashed paths unchanged", () => {
+    expect(preferTrailingSlashFetchUrl("https://example.com/")).toBe(
+      "https://example.com/",
+    );
+    expect(preferTrailingSlashFetchUrl("https://example.com/blog/")).toBe(
+      "https://example.com/blog/",
     );
   });
 });

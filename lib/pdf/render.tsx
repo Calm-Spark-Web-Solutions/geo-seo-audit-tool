@@ -20,6 +20,7 @@ export interface AuditPdfPayload {
   company: Company | null;
   siteWideChecks: AuditCheck[];
   cruxFieldChecks: AuditCheck[];
+  googleFieldChecks: AuditCheck[];
   manualChecklistRows: ManualChecklistPdfRow[];
 }
 
@@ -47,7 +48,7 @@ export async function loadAuditPdfPayload(
   const { data: audit, error: auditErr } = await supabase
     .from("audits")
     .select(
-      "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, site_wide_checks, crux_field_checks, report_pdf_path, report_generated_at, created_at",
+      "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, fetch_failures, site_wide_checks, crux_field_checks, google_field_checks, google_metrics, report_pdf_path, report_generated_at, created_at",
     )
     .eq("id", auditId)
     .maybeSingle();
@@ -88,6 +89,8 @@ export async function loadAuditPdfPayload(
   const siteWideChecks = Array.isArray(sw) ? (sw as AuditCheck[]) : [];
   const cr = typedAudit.crux_field_checks;
   const cruxFieldChecks = Array.isArray(cr) ? (cr as AuditCheck[]) : [];
+  const gf = typedAudit.google_field_checks;
+  const googleFieldChecks = Array.isArray(gf) ? (gf as AuditCheck[]) : [];
   const typedCommunity = (community as Community | null) ?? null;
 
   return {
@@ -97,6 +100,7 @@ export async function loadAuditPdfPayload(
     company,
     siteWideChecks,
     cruxFieldChecks,
+    googleFieldChecks,
     manualChecklistRows: buildManualPdfRows(typedCommunity),
   };
 }
@@ -118,6 +122,8 @@ export async function renderAuditPdfBuffer(
       pages={payload.pages}
       siteWideChecks={payload.siteWideChecks}
       cruxFieldChecks={payload.cruxFieldChecks}
+      googleFieldChecks={payload.googleFieldChecks}
+      manualChecklistRows={payload.manualChecklistRows}
       variant={variant}
     />,
   );

@@ -4,11 +4,13 @@ import { notFound } from "next/navigation";
 import { AuditDetailLive } from "@/components/audits/AuditDetailLive";
 import { DeleteAuditButton } from "@/components/audits/DeleteAuditButton";
 import { PdfActions } from "@/components/audits/PdfActions";
-import { PsiCoverageCard } from "@/components/audits/PsiCoverageCard";
 import { CommunityManualChecklist } from "@/components/communities/CommunityManualChecklist";
 import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { EXPERT_CHECKLIST_CARD_DESCRIPTION } from "@/lib/checklists/expert-checklist-copy";
+import { userAllowedPdfExport } from "@/lib/billing/subscription-access";
 import { createClient } from "@/lib/supabase/server";
+import { isStripeConfigured } from "@/lib/stripe/server";
 import type {
   Audit,
   AuditCheck,
@@ -33,12 +35,26 @@ export default async function AuditReportPage({
   const { id } = await params;
   const supabase = await createClient();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const stripeOn = isStripeConfigured();
+  let pdfExportAllowed = true;
+  if (user && stripeOn) {
+    const { data: subRow } = await supabase
+      .from("subscriptions")
+      .select("status")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    pdfExportAllowed = userAllowedPdfExport(stripeOn, subRow);
+  }
+
   const [{ data: audit, error: auditError }, { data: pages }, { data: auditJob }] =
     await Promise.all([
       supabase
         .from("audits")
         .select(
-          "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, site_wide_checks, crux_field_checks, engine_version, report_pdf_path, report_generated_at, created_at",
+          "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, fetch_failures, site_wide_checks, crux_field_checks, google_field_checks, google_metrics, engine_version, report_pdf_path, report_generated_at, created_at",
         )
         .eq("id", id)
         .maybeSingle(),
@@ -144,35 +160,32 @@ export default async function AuditReportPage({
         }
         title="Visibility scan"
         description={
-          <span className="flex flex-col gap-1">
-            <span>Per-page SEO and GEO checks and site-wide probes for this scan.</span>
-            {typedCommunity?.facility_type ? (
-              <span className="text-muted-foreground">
-                Facility type · {typedCommunity.facility_type}
-              </span>
-            ) : null}
-          </span>
+          typedCommunity?.facility_type ? (
+            <span className="text-muted-foreground">
+              {typedCommunity.facility_type}
+            </span>
+          ) : undefined
         }
         actions={
-          <DeleteAuditButton
-            auditId={typedAudit.id}
-            auditLabel={new Date(typedAudit.created_at).toLocaleString()}
-            disabled={
-              typedAudit.status === "pending" || typedAudit.status === "running"
-            }
-          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <PdfActions
+              auditId={typedAudit.id}
+              hasSavedPdf={Boolean(typedAudit.report_pdf_path)}
+              generatedAt={typedAudit.report_generated_at}
+              pdfExportAllowed={pdfExportAllowed}
+              variant="row"
+            />
+            <DeleteAuditButton
+              auditId={typedAudit.id}
+              auditLabel={new Date(typedAudit.created_at).toLocaleString()}
+              disabled={
+                typedAudit.status === "pending" ||
+                typedAudit.status === "running"
+              }
+            />
+          </div>
         }
       />
-
-      <PdfActions
-        auditId={typedAudit.id}
-        hasSavedPdf={Boolean(typedAudit.report_pdf_path)}
-        generatedAt={typedAudit.report_generated_at}
-      />
-
-      {typedAudit.status === "complete" ? (
-        <PsiCoverageCard auditId={typedAudit.id} />
-      ) : null}
 
       <AuditDetailLive
         key={typedAudit.id}
@@ -186,6 +199,7 @@ export default async function AuditReportPage({
         <CommunityManualChecklist
           communityId={typedCommunity.id}
           initialResults={typedCommunity.manual_check_results}
+          cardDescription={EXPERT_CHECKLIST_CARD_DESCRIPTION}
           variant="collapsible"
         />
       ) : null}

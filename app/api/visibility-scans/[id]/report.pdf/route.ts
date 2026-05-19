@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { userAllowedPaidProductFeatures } from "@/lib/billing/subscription-access";
+import { userAllowedPdfExport } from "@/lib/billing/subscription-access";
 import type { PdfReportVariant } from "@/lib/pdf/report";
 import { loadAuditPdfPayload, renderAuditPdfBuffer } from "@/lib/pdf/render";
 import { createClient } from "@/lib/supabase/server";
@@ -39,11 +39,11 @@ export async function GET(
     .select("status")
     .eq("user_id", user.id)
     .maybeSingle();
-  if (!userAllowedPaidProductFeatures(stripeOn, subRow)) {
+  if (!userAllowedPdfExport(stripeOn, subRow)) {
     return NextResponse.json(
       {
         error:
-          "Subscription required. Open Settings to subscribe before downloading PDFs.",
+          "PDF export unlocks after your subscription is active (trial includes scans but not PDF download). Open Settings to finish checkout.",
       },
       { status: 403 },
     );

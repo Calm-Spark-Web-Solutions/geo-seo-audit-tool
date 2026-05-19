@@ -12,6 +12,12 @@ import {
   SEO_SECTION_DESCRIPTION,
   SEO_SECTION_TITLE,
 } from "@/lib/audit/reader-copy";
+import { isCommunityManualGeoKey } from "@/lib/checklists/community-manual";
+import {
+  isPartialCrawl,
+  partialCrawlFailedCount,
+  partialCrawlSummary,
+} from "@/lib/audit/partial-crawl";
 import { categoryLabelSortKey } from "@/lib/crawler/shard-labels";
 import { categoryScoreEffective } from "@/lib/scoring/effective-scores";
 import type {
@@ -19,12 +25,15 @@ import type {
   AuditCheck,
   AuditCheckEvidence,
   AuditCheckEvidenceItem,
+  AuditFetchFailure,
   AuditPage,
   CheckResult,
   Community,
   Company,
   FixItem,
   FixPriority,
+  ManualChecklistPdfRow,
+  ManualVerificationStatus,
 } from "@/types";
 
 // --- Design tokens ----------------------------------------------------------
@@ -253,6 +262,27 @@ const styles = StyleSheet.create({
     fontSize: tokens.font.xs,
     color: tokens.color.subtle,
   },
+  partialNotice: {
+    marginTop: tokens.space.s12,
+    padding: tokens.space.s12,
+    backgroundColor: tokens.color.warnBg,
+  },
+  partialNoticeTitle: {
+    fontSize: tokens.font.md,
+    fontFamily: "Helvetica-Bold",
+    color: tokens.color.warn,
+    marginBottom: tokens.space.s4,
+  },
+  partialNoticeBody: {
+    fontSize: tokens.font.sm,
+    color: tokens.color.inkSoft,
+    lineHeight: 1.4,
+  },
+  partialFailureRow: {
+    marginTop: tokens.space.s6,
+    fontSize: tokens.font.xs,
+    color: tokens.color.muted,
+  },
 
   /** Filled panel for flow content — no border props (react-pdf layout bugs with paginated Views). */
   cardWrap: {
@@ -269,6 +299,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: tokens.font.sm,
     color: tokens.color.muted,
+  },
+  googleMetricsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: tokens.space.s8,
+    gap: tokens.space.s8,
+  },
+  googleMetricsItem: {
+    fontSize: tokens.font.sm,
+    color: tokens.color.ink,
+    width: "48%",
   },
 
   // Executive summary tiles.
@@ -567,6 +608,18 @@ function statusColors(result: CheckResult): { bg: string; fg: string } {
   return { bg: tokens.color.failBg, fg: tokens.color.fail };
 }
 
+function manualStatusColors(
+  status: ManualVerificationStatus,
+): { bg: string; fg: string; glyph: string } {
+  if (status === "pass")
+    return { bg: tokens.color.passBg, fg: tokens.color.pass, glyph: "OK" };
+  if (status === "warn")
+    return { bg: tokens.color.warnBg, fg: tokens.color.warn, glyph: "!" };
+  if (status === "fail")
+    return { bg: tokens.color.failBg, fg: tokens.color.fail, glyph: "X" };
+  return { bg: tokens.color.surfaceAlt, fg: tokens.color.subtle, glyph: "—" };
+}
+
 function scoreTint(score: number | null | undefined): {
   bg: string;
   fg: string;
@@ -862,10 +915,13 @@ interface AggregatedAction {
   affectedUrls: string[];
 }
 
-function aggregateActionItems(pages: AuditPage[]): AggregatedAction[] {
+function aggregateActionItems(
+  pages: AuditPage[],
+  variant: PdfReportVariant,
+): AggregatedAction[] {
   const map = new Map<string, AggregatedAction>();
   for (const p of pages) {
-    const fixes = (p.fixes ?? []) as FixItem[];
+    const fixes = fixesForPdfVariant(p, variant);
     for (const fix of fixes) {
       const title = safeText(fix.title).trim();
       if (!title) continue;
@@ -1049,6 +1105,19 @@ interface HeadlineCounts {
 /** Checks retired from the engine but still present on legacy audit JSON — omit from PDFs. */
 const PDF_OMIT_DEPRECATED_CHECK_KEYS = new Set<string>(["images_with_captions"]);
 
+/**
+ * GEO-only PDFs focus on AI-readiness content checks — omit Lighthouse (PSI),
+ * CrUX field metrics, and sampled internal-link reachability probes.
+ */
+const GEO_PDF_OMIT_CHECK_KEYS = new Set<string>(["internal_link_health"]);
+
+function isOmittedFromGeoPdfCheck(check: AuditCheck): boolean {
+  if (GEO_PDF_OMIT_CHECK_KEYS.has(check.key)) return true;
+  if (check.key.startsWith("psi_")) return true;
+  if (check.key.startsWith("crux_")) return true;
+  return false;
+}
+
 /** PDF scope: combined report or a single pillar slice for downloads. */
 export type PdfReportVariant = "full" | "seo" | "geo";
 
@@ -1061,7 +1130,64 @@ export function checksForPdfVariant(
   else if (variant === "seo") out = checks.filter((c) => c.pillar !== "GEO");
   else out = checks.filter((c) => c.pillar !== "SEO");
 
-  return out.filter((c) => !PDF_OMIT_DEPRECATED_CHECK_KEYS.has(c.key));
+  out = out.filter((c) => !PDF_OMIT_DEPRECATED_CHECK_KEYS.has(c.key));
+  if (variant === "geo") {
+    out = out.filter((c) => !isOmittedFromGeoPdfCheck(c));
+  }
+  return out;
+}
+
+/** Expert checklist rows included per PDF variant (GEO PDFs: five `geo_*` sign-offs only). */
+export function manualChecklistRowsForPdfVariant(
+  rows: ManualChecklistPdfRow[],
+  variant: PdfReportVariant,
+): ManualChecklistPdfRow[] {
+  if (variant === "geo") {
+    return rows.filter((r) => isCommunityManualGeoKey(r.key));
+  }
+  if (variant === "seo") {
+    return rows.filter((r) => !isCommunityManualGeoKey(r.key));
+  }
+  return rows;
+}
+
+/** Fixes for PDF action plans — GEO variant rebuilds from filtered checks only. */
+function fixesFromCheckList(checks: AuditCheck[]): FixItem[] {
+  const out: FixItem[] = [];
+  for (const c of checks) {
+    if (c.result === "fail") {
+      out.push({
+        priority: "high",
+        title: c.label,
+        detail: c.explanation,
+      });
+    } else if (c.result === "warn") {
+      out.push({
+        priority: "medium",
+        title: c.label,
+        detail: c.explanation,
+      });
+    }
+  }
+  return out;
+}
+
+function fixesForPdfVariant(
+  page: AuditPage,
+  variant: PdfReportVariant,
+): FixItem[] {
+  if (variant === "full") {
+    return (page.fixes ?? []) as FixItem[];
+  }
+  const seo = checksForPdfVariant(
+    (page.seo_results ?? []) as AuditCheck[],
+    variant,
+  );
+  const geo = checksForPdfVariant(
+    (page.geo_results ?? []) as AuditCheck[],
+    variant,
+  );
+  return fixesFromCheckList([...seo, ...geo]);
 }
 
 function computeHeadlineCounts(
@@ -1092,7 +1218,7 @@ function computeHeadlineCounts(
   for (const p of pages) {
     tally(checksForPdfVariant((p.seo_results ?? []) as AuditCheck[], variant));
     tally(checksForPdfVariant((p.geo_results ?? []) as AuditCheck[], variant));
-    const fixes = (p.fixes ?? []) as FixItem[];
+    const fixes = fixesForPdfVariant(p, variant);
     counts.fixes += fixes.length;
     for (const fx of fixes) {
       const prio = (fx.priority ?? "low") as FixPriority;
@@ -1113,6 +1239,8 @@ export interface AuditReportPdfProps {
   pages: AuditPage[];
   siteWideChecks: AuditCheck[];
   cruxFieldChecks: AuditCheck[];
+  googleFieldChecks?: AuditCheck[];
+  manualChecklistRows?: ManualChecklistPdfRow[];
   variant?: PdfReportVariant;
 }
 
@@ -1123,6 +1251,8 @@ export function AuditReportPdfDocument({
   pages,
   siteWideChecks,
   cruxFieldChecks,
+  googleFieldChecks = [],
+  manualChecklistRows = [],
   variant: variantProp,
 }: AuditReportPdfProps) {
   const variant = variantProp ?? "full";
@@ -1137,9 +1267,9 @@ export function AuditReportPdfDocument({
 
   const filteredSiteWide = checksForPdfVariant(siteWideChecks, variant);
   const filteredCrux = checksForPdfVariant(cruxFieldChecks, variant);
+  const filteredGoogle = checksForPdfVariant(googleFieldChecks, variant);
 
-  /** Aggregate fixes omit pillar — same prioritized plan on all PDF variants. */
-  const actionItems = aggregateActionItems(pages);
+  const actionItems = aggregateActionItems(pages, variant);
   const headlineCounts = computeHeadlineCounts(
     pages,
     siteWideChecks,
@@ -1179,11 +1309,15 @@ export function AuditReportPdfDocument({
     variant === "seo"
       ? "Search-focused checks from this visibility scan (technical SEO, crawl signals, and Lighthouse-derived signals scoped to SEO)."
       : variant === "geo"
-        ? "AI-readiness and engagement-focused checks (structure, depth, CrUX field metrics, and GEO-scoped Lighthouse signals)."
+        ? "AI-readiness and engagement-focused checks (structure, depth, and content clarity for AI systems)."
         : "What this visibility scan covered and where to focus first.";
 
   const showSiteWideSection =
-    filteredSiteWide.length > 0 || filteredCrux.length > 0;
+    filteredSiteWide.length > 0 ||
+    filteredCrux.length > 0 ||
+    filteredGoogle.length > 0;
+  const partialCrawl = isPartialCrawl(audit);
+  const fetchFailures = (audit.fetch_failures ?? []) as AuditFetchFailure[];
 
   return (
     <Document title={docTitle} author={pdfBrandName} subject={docSubject}>
@@ -1226,60 +1360,83 @@ export function AuditReportPdfDocument({
           ) : null}
 
           <View style={styles.scoreRow} wrap={false}>
-            <View style={styles.scoreCard}>
-              <Text style={styles.scoreLabel}>Overall</Text>
-              <View style={styles.scoreValueRow}>
-                <Text style={[styles.scoreValue, { color: overallTint.fg }]}>
-                  {audit.score ?? "—"}
-                </Text>
-                <Text style={styles.scoreSuffix}>/ 100</Text>
-              </View>
-            </View>
-            <View style={styles.scoreCardSpaced}>
-              <Text style={styles.scoreLabel}>SEO</Text>
-              <View style={styles.scoreValueRow}>
-                <Text
-                  style={[
-                    styles.scoreValue,
-                    {
-                      color:
-                        variant === "geo"
-                          ? tokens.color.subtle
-                          : seoTint.fg,
-                    },
-                  ]}
-                >
-                  {variant === "geo" ? "—" : (audit.seo_score ?? "—")}
-                </Text>
-                <Text style={styles.scoreSuffix}>/ 100</Text>
-              </View>
-            </View>
-            <View style={styles.scoreCardSpaced}>
-              <Text style={styles.scoreLabel}>GEO</Text>
-              <View style={styles.scoreValueRow}>
-                <Text
-                  style={[
-                    styles.scoreValue,
-                    {
-                      color:
-                        variant === "seo"
-                          ? tokens.color.subtle
-                          : geoTint.fg,
-                    },
-                  ]}
-                >
-                  {variant === "seo" ? "—" : (audit.geo_score ?? "—")}
-                </Text>
-                <Text style={styles.scoreSuffix}>/ 100</Text>
-              </View>
-            </View>
-            <View style={styles.scoreCardSpaced}>
-              <Text style={styles.scoreLabel}>Pages crawled</Text>
-              <View style={styles.scoreValueRow}>
-                <Text style={styles.scoreValue}>{audit.pages_crawled}</Text>
-              </View>
-            </View>
+            {variant === "full" ? (
+              <>
+                <View style={styles.scoreCard}>
+                  <Text style={styles.scoreLabel}>Overall</Text>
+                  <View style={styles.scoreValueRow}>
+                    <Text style={[styles.scoreValue, { color: overallTint.fg }]}>
+                      {audit.score ?? "—"}
+                    </Text>
+                    <Text style={styles.scoreSuffix}>/ 100</Text>
+                  </View>
+                </View>
+                <View style={styles.scoreCardSpaced}>
+                  <Text style={styles.scoreLabel}>SEO</Text>
+                  <View style={styles.scoreValueRow}>
+                    <Text style={[styles.scoreValue, { color: seoTint.fg }]}>
+                      {audit.seo_score ?? "—"}
+                    </Text>
+                    <Text style={styles.scoreSuffix}>/ 100</Text>
+                  </View>
+                </View>
+                <View style={styles.scoreCardSpaced}>
+                  <Text style={styles.scoreLabel}>GEO</Text>
+                  <View style={styles.scoreValueRow}>
+                    <Text style={[styles.scoreValue, { color: geoTint.fg }]}>
+                      {audit.geo_score ?? "—"}
+                    </Text>
+                    <Text style={styles.scoreSuffix}>/ 100</Text>
+                  </View>
+                </View>
+                <View style={styles.scoreCardSpaced}>
+                  <Text style={styles.scoreLabel}>Pages crawled</Text>
+                  <View style={styles.scoreValueRow}>
+                    <Text style={styles.scoreValue}>{audit.pages_crawled}</Text>
+                  </View>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.scoreCard}>
+                  <Text style={styles.scoreLabel}>
+                    {variant === "seo" ? "SEO" : "GEO"}
+                  </Text>
+                  <View style={styles.scoreValueRow}>
+                    <Text
+                      style={[
+                        styles.scoreValue,
+                        {
+                          color:
+                            variant === "seo" ? seoTint.fg : geoTint.fg,
+                        },
+                      ]}
+                    >
+                      {variant === "seo"
+                        ? (audit.seo_score ?? "—")
+                        : (audit.geo_score ?? "—")}
+                    </Text>
+                    <Text style={styles.scoreSuffix}>/ 100</Text>
+                  </View>
+                </View>
+                <View style={styles.scoreCardSpaced}>
+                  <Text style={styles.scoreLabel}>Pages crawled</Text>
+                  <View style={styles.scoreValueRow}>
+                    <Text style={styles.scoreValue}>{audit.pages_crawled}</Text>
+                  </View>
+                </View>
+              </>
+            )}
           </View>
+
+          {partialCrawl ? (
+            <View style={styles.partialNotice} wrap={false}>
+              <Text style={styles.partialNoticeTitle}>Partial scan</Text>
+              <Text style={styles.partialNoticeBody}>
+                {partialCrawlSummary(audit)}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
         {/* Executive summary */}
@@ -1385,6 +1542,47 @@ export function AuditReportPdfDocument({
                 <ChecksTable checks={filteredCrux} hidePass={false} />
               </View>
             ) : null}
+
+            {filteredGoogle.length > 0 ? (
+              <View style={styles.cardWrap} wrap>
+                <Text style={styles.cardTitle}>
+                  Google Search Console &amp; GA4
+                </Text>
+                <Text style={styles.cardDescription}>
+                  Property linkage and 28-day signals when Google is connected.
+                </Text>
+                <ChecksTable checks={filteredGoogle} hidePass={false} />
+              </View>
+            ) : null}
+
+            {audit.google_metrics ? (
+              <View style={styles.cardWrap} wrap>
+                <Text style={styles.cardTitle}>
+                  Google traffic (last 28 days)
+                </Text>
+                <Text style={styles.cardDescription}>
+                  Totals captured when this scan completed.
+                </Text>
+                <View style={styles.googleMetricsRow}>
+                  <Text style={styles.googleMetricsItem}>
+                    GSC clicks:{" "}
+                    {audit.google_metrics.gsc_clicks_28d.toLocaleString()}
+                  </Text>
+                  <Text style={styles.googleMetricsItem}>
+                    GSC impressions:{" "}
+                    {audit.google_metrics.gsc_impressions_28d.toLocaleString()}
+                  </Text>
+                  <Text style={styles.googleMetricsItem}>
+                    GA4 sessions:{" "}
+                    {audit.google_metrics.ga4_sessions_28d.toLocaleString()}
+                  </Text>
+                  <Text style={styles.googleMetricsItem}>
+                    GA4 active users:{" "}
+                    {audit.google_metrics.ga4_active_users_28d.toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
           </>
         ) : null}
 
@@ -1476,11 +1674,34 @@ export function AuditReportPdfDocument({
         <RunningHeader leftTitle={pdfBrandName} auditDate={auditDate} />
         <PdfFooter brandName={pdfBrandName} generated={generated} />
 
+        {partialCrawl && fetchFailures.length > 0 ? (
+          <>
+            <SectionHeading
+              eyebrow="Appendix"
+              title="Failed URL fetches"
+              description={`${partialCrawlFailedCount(audit)} URL${partialCrawlFailedCount(audit) === 1 ? "" : "s"} could not be fetched during this scan.`}
+              first
+            />
+            <View style={styles.cardWrap} wrap>
+              {fetchFailures.map((f) => (
+                <Text key={f.url} style={styles.partialFailureRow}>
+                  {safeText(f.url)} — {safeText(f.reason.replace(/_/g, " "))}
+                </Text>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        <ExpertManualChecklistSection
+          rows={manualChecklistRows}
+          variant={variant}
+        />
+
         <SectionHeading
-          eyebrow="Appendix A"
+          eyebrow="Appendix B"
           title="Glossary"
           description="Recurring terms used in this report."
-          first
+          first={manualChecklistRowsForPdfVariant(manualChecklistRows, variant).length === 0}
         />
         <View style={styles.cardWrap} wrap>
           {variant !== "geo" ? (
@@ -1499,10 +1720,12 @@ export function AuditReportPdfDocument({
             term="Site-wide probe"
             definition="An origin-level signal (robots.txt, sitemap discovery, AI bot rules) that applies to every URL on the site rather than a single page."
           />
-          <GlossaryItem
-            term="CrUX field metrics"
-            definition="Chrome UX Report 28-day origin-level p75 metrics (LCP, INP, CLS) gathered from real Chrome users — only available when traffic meets Google's threshold."
-          />
+          {variant === "full" || variant === "seo" ? (
+            <GlossaryItem
+              term="CrUX field metrics"
+              definition="Chrome UX Report 28-day origin-level p75 metrics (LCP, INP, CLS) gathered from real Chrome users — only available when traffic meets Google's threshold."
+            />
+          ) : null}
           <GlossaryItem
             term="Pass / Warn / Fail"
             definition="Each check returns one verdict per URL. Pass: no issue flagged. Warn: review recommended. Fail: fix recommended when you can."
@@ -1534,5 +1757,84 @@ function GlossaryItem({
       <Text style={styles.glossaryTerm}>{term}</Text>
       <Text style={styles.glossaryDefinition}>{definition}</Text>
     </View>
+  );
+}
+
+function ManualChecklistStatusPill({
+  status,
+}: {
+  status: ManualVerificationStatus;
+}) {
+  const c = manualStatusColors(status);
+  return (
+    <View style={[styles.statusPillBox, { backgroundColor: c.bg }]}>
+      <Text style={[styles.statusPillGlyph, { color: c.fg }]}>{c.glyph}</Text>
+    </View>
+  );
+}
+
+function ExpertManualChecklistSection({
+  rows,
+  variant,
+}: {
+  rows: ManualChecklistPdfRow[];
+  variant: PdfReportVariant;
+}) {
+  const filtered = manualChecklistRowsForPdfVariant(rows, variant);
+  if (filtered.length === 0) return null;
+
+  const byCategory = new Map<string, ManualChecklistPdfRow[]>();
+  for (const row of filtered) {
+    const list = byCategory.get(row.category) ?? [];
+    list.push(row);
+    byCategory.set(row.category, list);
+  }
+
+  const appendixTitle =
+    variant === "geo"
+      ? "GEO expert checklist (human sign-off)"
+      : "Expert checklist (human sign-off)";
+  const appendixDescription =
+    variant === "geo"
+      ? "Five qualitative GEO review items stored per community. They do not change automated GEO scores on this scan."
+      : variant === "seo"
+        ? "Human-reviewed crawl, performance, SEO, and local items (GEO-only rows omitted in this SEO export)."
+        : "Human-reviewed items stored per community until updated on the community page. They do not change automated SEO/GEO scores on this scan.";
+
+  return (
+    <>
+      <SectionHeading
+        eyebrow="Appendix A"
+        title={appendixTitle}
+        description={appendixDescription}
+        first
+      />
+      {Array.from(byCategory.entries()).map(([category, items]) => (
+        <View key={category} style={styles.cardWrap} wrap>
+          <Text style={styles.cardTitle}>{category}</Text>
+          {items.map((row) => (
+            <View key={row.key} style={styles.checkRow} wrap={false}>
+              <View style={styles.checkHeader}>
+                <View style={styles.checkStatusCell}>
+                  <ManualChecklistStatusPill status={row.status} />
+                </View>
+                <Text style={styles.checkLabel}>{safeText(row.label)}</Text>
+              </View>
+              {row.helper ? (
+                <Text style={styles.checkExplanation}>{safeText(row.helper)}</Text>
+              ) : null}
+              {row.notes ? (
+                <Text style={styles.checkEvidence}>Notes: {safeText(row.notes)}</Text>
+              ) : null}
+              {row.status === "unreviewed" ? (
+                <Text style={styles.checkScoringNote}>
+                  Status: unreviewed — complete on the community page in RankLume.
+                </Text>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      ))}
+    </>
   );
 }

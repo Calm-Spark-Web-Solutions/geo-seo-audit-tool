@@ -11,6 +11,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { findInspectorEvidence, loadInspectorContext } from "@/lib/audit/inspector";
+import { hintsFromAuditChecks } from "@/lib/scoring/page-schema-hints";
+import {
+  evaluateSchemaFit,
+  inferPageSchemaRoleWithMeta,
+  pageSchemaRoleLabel,
+} from "@/lib/scoring/page-schema-role";
 import type { AuditCheck, AuditCheckEvidenceItem } from "@/types";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +31,7 @@ const TIER_CONTENT = new Set([
   "Event", "Review", "AggregateRating",
 ]);
 const TIER_STRUCTURE = new Set([
-  "WebSite", "WebPage", "AboutPage", "ContactPage",
+  "WebSite", "WebPage", "AboutPage", "ContactPage", "Place",
   "BreadcrumbList", "SiteLinksSearchBox", "ItemList",
 ]);
 
@@ -94,8 +100,26 @@ export default async function SchemaInspectorPage({
   const related = relatedSchemaChecks(ctx.checks);
   const detectedTypeSet = new Set(schemaItems.map((s) => s.schemaType));
 
+  const hints = hintsFromAuditChecks(ctx.checks);
+  const { role: pageRole, confidence, reason } = inferPageSchemaRoleWithMeta({
+    pageUrl: ctx.page.url,
+    hints,
+    detectedTypes: detectedTypeSet,
+  });
+  const schemaFitRows = evaluateSchemaFit(pageRole, detectedTypeSet);
+
+  const confidenceLabel =
+    confidence === "high"
+      ? "High confidence"
+      : confidence === "medium"
+        ? "Medium confidence"
+        : "Low confidence";
+
   // Check Service/ProfessionalService as a combined key
   const hasService = detectedTypeSet.has("Service") || detectedTypeSet.has("ProfessionalService");
+
+  const priorityLabel = (p: string) =>
+    p.charAt(0).toUpperCase() + p.slice(1);
 
   return (
     <>
@@ -113,6 +137,73 @@ export default async function SchemaInspectorPage({
         }
       />
 
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Recommended for this page</CardTitle>
+          <CardDescription className="flex flex-col gap-1">
+            <span>
+              Inferred page type:{" "}
+              <span className="font-medium text-foreground">
+                {pageSchemaRoleLabel(pageRole)}
+              </span>
+              {" · "}
+              <span className="font-medium text-foreground">{confidenceLabel}</span>
+            </span>
+            <span className="text-xs">{reason}</span>
+            <span className="text-xs">
+              Guidance only — automated SEO/GEO scores still use sitewide schema
+              checks on every URL. Types may also appear via shared JSON-LD on
+              another template.
+            </span>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto rounded-md border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    Schema
+                  </th>
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    Priority
+                  </th>
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    On this page
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {schemaFitRows.map((row) => (
+                  <tr key={row.key} className="border-t border-border align-top">
+                    <td className="px-3 py-2.5">
+                      <p className="font-medium text-foreground">{row.label}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{row.why}</p>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
+                      {priorityLabel(row.priority)}
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {row.status === "present" ? (
+                        <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                          Found
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground">
+                          <XCircle className="h-4 w-4 shrink-0 opacity-60" aria-hidden />
+                          Not found
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
       {schemaItems.length === 0 ? (
         <EmptyState
           icon={Tag}
@@ -121,7 +212,6 @@ export default async function SchemaInspectorPage({
         />
       ) : (
         <>
-          {/* Detected types with color-coded tiers */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Detected schema @types</CardTitle>
@@ -173,9 +263,10 @@ export default async function SchemaInspectorPage({
           {/* Key types gap analysis */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Key types for local service businesses</CardTitle>
+              <CardTitle className="text-base">Sitewide types (all pages)</CardTitle>
               <CardDescription>
-                High-impact schema types that AI assistants and local-search rankings reward most.
+                High-impact types often placed in global JSON-LD — compare with the
+                page-specific recommendations above.
               </CardDescription>
             </CardHeader>
             <CardContent>

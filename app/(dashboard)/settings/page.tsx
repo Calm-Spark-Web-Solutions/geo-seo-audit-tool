@@ -4,6 +4,7 @@ import { BillingAlert } from "@/components/billing/BillingAlert";
 import { BillingUsageCard } from "@/components/billing/BillingUsageCard";
 import { PricingCards } from "@/components/billing/PricingCards";
 import { ProfileSettingsSection } from "@/components/settings/ProfileSettingsSection";
+import { GoogleIntegrationsLoader } from "@/components/settings/GoogleIntegrationsLoader";
 import { SettingsOrganizationsSection } from "@/components/settings/SettingsOrganizationsSection";
 import { SettingsTeamInviteSection } from "@/components/teams/SettingsTeamInviteSection";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -20,7 +21,13 @@ import {
   formatUsd,
   PUBLIC_TIERS,
 } from "@/lib/billing/plans";
-import { PACK_PRICING, resolvePlanLimits } from "@/lib/billing/plan-limits";
+import {
+  PACK_PRICING,
+  RUNS_PACK_PRICING,
+  resolvePlanLimits,
+  monthlyVolumeDiscountedSubtotal,
+  TRIAL_PLAN_LIMITS,
+} from "@/lib/billing/plan-limits";
 import { loadBillingUsageSnapshot } from "@/lib/billing/usage-snapshot";
 import { createClient } from "@/lib/supabase/server";
 import { isStripeConfigured } from "@/lib/stripe/server";
@@ -50,6 +57,21 @@ export default async function SettingsPage({
       ? tabRaw
       : Array.isArray(tabRaw)
         ? tabRaw[0]
+        : undefined;
+
+  const googleRaw = sp.google;
+  const googleFlash =
+    typeof googleRaw === "string"
+      ? googleRaw
+      : Array.isArray(googleRaw)
+        ? googleRaw[0]
+        : undefined;
+  const reasonRaw = sp.reason;
+  const googleReason =
+    typeof reasonRaw === "string"
+      ? reasonRaw
+      : Array.isArray(reasonRaw)
+        ? reasonRaw[0]
         : undefined;
   const activeTab: SettingsTab =
     tabParam === "profile"
@@ -87,7 +109,10 @@ export default async function SettingsPage({
   // so the customer sees exactly what they're paying for. Falls back to a
   // simple plan label when the slug isn't one of the public tiers.
   const planSlug = subscription?.plan ?? null;
-  const planLimits = resolvePlanLimits(planSlug, subscription?.plan_limits ?? null);
+  const planLimits =
+    subscription?.status === "trialing"
+      ? TRIAL_PLAN_LIMITS
+      : resolvePlanLimits(planSlug, subscription?.plan_limits ?? null);
   const planTier = PUBLIC_TIERS.find(
     (t) => t.monthlyKey === planSlug || t.yearlyKey === planSlug,
   );
@@ -110,7 +135,7 @@ export default async function SettingsPage({
   const bonusPerCommunity = planLimits.newPagesPackBonusPerMonth ?? 0;
   const packsPerCommunity =
     bonusPerCommunity > 0
-      ? Math.round(bonusPerCommunity / PACK_PRICING.newPagesPerUnit)
+      ? Math.floor(bonusPerCommunity / PACK_PRICING.newPagesPerUnit)
       : 0;
   const packUnitPrice =
     planCycle === "yearly"
@@ -118,24 +143,38 @@ export default async function SettingsPage({
       : PACK_PRICING.unitMonthlyUsd;
   const packTotal = packsPerCommunity * communityCount * packUnitPrice;
 
+  const runsBonusPerCommunity = planLimits.monthlyScansPackBonusPerMonth ?? 0;
+  const runsPacksPerCommunity =
+    runsBonusPerCommunity > 0
+      ? Math.floor(runsBonusPerCommunity / RUNS_PACK_PRICING.monthlyScansPerUnit)
+      : 0;
+  const runsPackUnitPrice =
+    planCycle === "yearly"
+      ? RUNS_PACK_PRICING.unitYearlyUsd
+      : RUNS_PACK_PRICING.unitMonthlyUsd;
+  const runsPackTotal =
+    runsPacksPerCommunity * communityCount * runsPackUnitPrice;
+
   const cycleSuffix = planCycle === "yearly" ? "/yr" : "/mo";
+  const tierDiscounted =
+    planTier && unitPrice !== null
+      ? monthlyVolumeDiscountedSubtotal(unitPrice, communityCount)
+      : null;
   const tierTotalLine =
-    planTier && unitPrice !== null && planCycle
+    planTier && unitPrice !== null && planCycle && tierDiscounted !== null
       ? `${communityCount.toLocaleString()} ${
           communityCount === 1 ? "community" : "communities"
-        } × ${formatUsd(unitPrice)}${cycleSuffix} = ${formatUsd(
-          unitPrice * communityCount,
-        )}${cycleSuffix}`
+        } × ${formatUsd(unitPrice)}${cycleSuffix} → ${formatUsd(tierDiscounted)}${cycleSuffix} after volume discount`
       : null;
   const packTotalLine =
     packsPerCommunity > 0 && planCycle
-      ? `${packsPerCommunity} pack${packsPerCommunity === 1 ? "" : "s"} × ${communityCount.toLocaleString()} ${
+      ? `${packsPerCommunity} page pack${packsPerCommunity === 1 ? "" : "s"} × ${communityCount.toLocaleString()} ${
           communityCount === 1 ? "community" : "communities"
         } × ${formatUsd(packUnitPrice)}${cycleSuffix} = ${formatUsd(packTotal)}${cycleSuffix}`
       : null;
   const grandTotalLine =
-    planTier && unitPrice !== null && planCycle && packsPerCommunity > 0
-      ? `${formatUsd(unitPrice * communityCount + packTotal)}${cycleSuffix}`
+    planTier && unitPrice !== null && planCycle && tierDiscounted !== null
+      ? `${formatUsd(tierDiscounted + packTotal + runsPackTotal)}${cycleSuffix}`
       : null;
 
   return (
@@ -167,7 +206,7 @@ export default async function SettingsPage({
                   <CardTitle className="text-base">Current plan</CardTitle>
                   <CardDescription>
                     Subscription is tracked per login. With Stripe configured,
-                    starting new visibility scans and downloading PDF exports require{" "}
+                    starting visibility scans requires{" "}
                     <strong className="font-medium text-foreground">
                       Active
                     </strong>{" "}
@@ -175,7 +214,11 @@ export default async function SettingsPage({
                     <strong className="font-medium text-foreground">
                       Trialing
                     </strong>{" "}
-                    status from Checkout.
+                    status. PDF downloads require{" "}
+                    <strong className="font-medium text-foreground">
+                      Active
+                    </strong>{" "}
+                    (trial includes capped scans only).
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-1 text-sm">
@@ -248,7 +291,11 @@ export default async function SettingsPage({
               <SettingsTeamInviteSection />
             </div>
           ) : (
-            <div id="organizations">
+            <div id="organizations" className="space-y-6">
+              <GoogleIntegrationsLoader
+                googleFlash={googleFlash}
+                googleReason={googleReason}
+              />
               <SettingsOrganizationsSection />
             </div>
           )}

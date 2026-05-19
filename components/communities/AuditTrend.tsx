@@ -2,6 +2,7 @@
 
 import { TrendingUp } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
 
 import {
   Card,
@@ -10,14 +11,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Audit } from "@/types";
+import { Button } from "@/components/ui/button";
+import type { Audit, CommunityGoogleMetricsSnapshot } from "@/types";
 
 import type { TrendPoint } from "./AuditTrendChart";
 
-// Recharts is ~150 kB gzipped — load it on demand so list/detail
-// pages that never render the chart don't pay for it. `ssr: false`
-// means the chart only mounts on the client, which is fine here:
-// it's a non-critical visualization gated behind `points.length >= 2`.
 const AuditTrendChart = dynamic(() => import("./AuditTrendChart"), {
   ssr: false,
   loading: () => <Skeleton className="h-full w-full rounded-md" />,
@@ -25,9 +23,10 @@ const AuditTrendChart = dynamic(() => import("./AuditTrendChart"), {
 
 interface AuditTrendProps {
   audits: Audit[];
+  metricsSnapshots?: CommunityGoogleMetricsSnapshot[];
 }
 
-function buildPoints(audits: Audit[]): TrendPoint[] {
+function buildScorePoints(audits: Audit[]): TrendPoint[] {
   return audits
     .filter((a) => a.status === "complete")
     .slice(0, 20)
@@ -40,12 +39,75 @@ function buildPoints(audits: Audit[]): TrendPoint[] {
       score: a.score,
       seo_score: a.seo_score,
       geo_score: a.geo_score,
+      gsc_clicks: null,
+      ga4_sessions: null,
     }))
     .sort((a, b) => a.ts - b.ts);
 }
 
-export function AuditTrend({ audits }: AuditTrendProps) {
-  const points = buildPoints(audits);
+function mergeTrafficIntoPoints(
+  scorePoints: TrendPoint[],
+  snapshots: CommunityGoogleMetricsSnapshot[],
+): TrendPoint[] {
+  if (snapshots.length === 0) return scorePoints;
+
+  const byDate = new Map(
+    snapshots.map((s) => [
+      s.snapshot_date,
+      {
+        gsc: s.gsc_clicks_28d ?? null,
+        ga4: s.ga4_sessions_28d ?? null,
+        ts: new Date(s.snapshot_date).getTime(),
+      },
+    ]),
+  );
+
+  const merged = new Map<number, TrendPoint>();
+  for (const p of scorePoints) {
+    merged.set(p.ts, { ...p });
+  }
+
+  for (const snap of snapshots) {
+    const row = byDate.get(snap.snapshot_date);
+    if (!row) continue;
+    const existing = [...merged.values()].find(
+      (p) => p.date === new Date(snap.snapshot_date).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      }),
+    );
+    if (existing) {
+      existing.gsc_clicks = row.gsc;
+      existing.ga4_sessions = row.ga4;
+    } else {
+      merged.set(row.ts, {
+        ts: row.ts,
+        date: new Date(snap.snapshot_date).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        }),
+        score: null,
+        seo_score: null,
+        geo_score: null,
+        gsc_clicks: row.gsc,
+        ga4_sessions: row.ga4,
+      });
+    }
+  }
+
+  return [...merged.values()].sort((a, b) => a.ts - b.ts);
+}
+
+export function AuditTrend({ audits, metricsSnapshots = [] }: AuditTrendProps) {
+  const [showTraffic, setShowTraffic] = useState(false);
+  const hasTraffic = metricsSnapshots.length > 0;
+
+  const points = useMemo(() => {
+    const scores = buildScorePoints(audits);
+    return showTraffic && hasTraffic
+      ? mergeTrafficIntoPoints(scores, metricsSnapshots)
+      : scores;
+  }, [audits, metricsSnapshots, showTraffic, hasTraffic]);
 
   if (points.length === 0) {
     return null;
@@ -56,7 +118,7 @@ export function AuditTrend({ audits }: AuditTrendProps) {
     const latest = points[points.length - 1];
     const prev = points[points.length - 2];
     if (latest.score === null || prev.score === null) {
-      return `Last ${points.length} completed audits`;
+      return `Last ${points.length} data points`;
     }
     const delta = latest.score - prev.score;
     const sign = delta > 0 ? "+" : "";
@@ -77,6 +139,16 @@ export function AuditTrend({ audits }: AuditTrendProps) {
           </CardTitle>
           <CardDescription>{subtitle}</CardDescription>
         </div>
+        {hasTraffic ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setShowTraffic((v) => !v)}
+          >
+            {showTraffic ? "Hide traffic" : "Show traffic"}
+          </Button>
+        ) : null}
       </CardHeader>
       <div className="min-h-56 w-full min-w-0 px-2 pb-3 sm:px-4">
         {points.length < 2 ? (
@@ -84,7 +156,7 @@ export function AuditTrend({ audits }: AuditTrendProps) {
             Not enough data yet — run another audit to plot a trend.
           </div>
         ) : (
-          <AuditTrendChart points={points} />
+          <AuditTrendChart points={points} showTraffic={showTraffic && hasTraffic} />
         )}
       </div>
     </Card>

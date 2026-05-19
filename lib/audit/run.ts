@@ -4,20 +4,25 @@ import { devRunnerConsole } from "@/lib/audit/dev-runner-console";
 import { observabilityLog } from "@/lib/observability/log";
 import type { AuditCheck } from "@/types";
 import { crawlSite } from "@/lib/crawler/crawl";
-import { fetchPageWithMeta, type PageFetchMeta } from "@/lib/crawler/fetch";
+import {
+  fetchAllHtmlForAudit,
+  PAGE_FETCH_TIMEOUT_MS,
+  type PageWork,
+} from "@/lib/crawler/fetch-pages";
 import {
   DEFAULT_USER_AGENT,
   isAssetUrl,
   normalizeUrl,
   sameAuditSiteOrigin,
 } from "@/lib/crawler/normalize";
+import type { AuditFetchFailure } from "@/types";
 import {
   buildUrlToSitemapCategoryLabelMap,
   fetchSitemap,
   fetchUrlsFromShards,
 } from "@/lib/crawler/sitemap";
 import { sortLegalUrlsLast } from "@/lib/crawler/url-scan-order";
-import { retryMissingPsiForAudit } from "@/lib/audit/psi-retry";
+import { kickPsiDrainFireAndForget } from "@/lib/audit/runner-kick";
 import { recalculateAuditRollupScores } from "@/lib/audit/rollup-scores";
 import { recordRosterEntries } from "@/lib/billing/page-quota";
 import {
@@ -29,6 +34,9 @@ import { runCruxOriginChecks } from "@/lib/scoring/crux";
 import { detectLikelyPasswordGate } from "@/lib/scoring/password-gate";
 import { buildCrawlGraphChecks } from "@/lib/scoring/crawl-graph";
 import { buildNearDuplicateChecks } from "@/lib/scoring/near-duplicate";
+import { runGoogleFieldChecks } from "@/lib/integrations/google/field-checks";
+import { syncGoogleMetricsForCommunity } from "@/lib/integrations/google/metrics-snapshot";
+import { buildAnalyticsSiteWideChecks } from "@/lib/scoring/analytics-tags";
 import { runSiteWideChecks } from "@/lib/scoring/site-wide";
 
 /**
@@ -38,19 +46,11 @@ import { runSiteWideChecks } from "@/lib/scoring/site-wide";
  */
 const LEGACY_MAX_PAGES = 10;
 const HARD_PAGE_CEILING = 1000;
-const FETCH_TIMEOUT_MS = 8000;
-const FETCH_BATCH_SIZE = 10;
 // Raised from 3 → 5 now that per-position PSI stagger is removed. The PSI
 // scorer handles 429s with retry/back-off, so pre-emptive serialisation is
 // no longer needed. 5 concurrent pages = ~40 % more scoring throughput.
 const SCORE_CONCURRENCY = 5;
 const ENGINE_VERSION = 4;
-
-interface PageWork {
-  url: string;
-  html: string;
-  meta: PageFetchMeta;
-}
 
 /**
  * Cheap status probe used inside the per-batch loop. Returns `true` when
@@ -99,26 +99,6 @@ function coerceAuditTextArray(
     return null;
   }
   return raw.filter((u): u is string => typeof u === "string");
-}
-
-async function fetchAllHtml(urls: string[]): Promise<PageWork[]> {
-  const out: PageWork[] = [];
-  for (let i = 0; i < urls.length; i += FETCH_BATCH_SIZE) {
-    const slice = urls.slice(i, i + FETCH_BATCH_SIZE);
-    const batch = await Promise.all(
-      slice.map(async (url) => {
-        const got = await fetchPageWithMeta(url, {
-          timeoutMs: FETCH_TIMEOUT_MS,
-          userAgent: DEFAULT_USER_AGENT,
-        });
-        return got ? { url, html: got.html, meta: got.meta } : null;
-      }),
-    );
-    for (const p of batch) {
-      if (p) out.push(p);
-    }
-  }
-  return out;
 }
 
 /**
@@ -172,7 +152,7 @@ async function resolveUrls(
   if (shardUrls && shardUrls.length > 0) {
     const list = await fetchUrlsFromShards(shardUrls, base, {
       maxPages,
-      timeoutMs: FETCH_TIMEOUT_MS,
+      timeoutMs: PAGE_FETCH_TIMEOUT_MS,
       userAgent: DEFAULT_USER_AGENT,
     });
     return sortLegalUrlsLast(list);
@@ -180,14 +160,14 @@ async function resolveUrls(
 
   const fromSitemap = await fetchSitemap(base, {
     maxPages,
-    timeoutMs: FETCH_TIMEOUT_MS,
+    timeoutMs: PAGE_FETCH_TIMEOUT_MS,
     userAgent: DEFAULT_USER_AGENT,
   });
   if (fromSitemap.length > 0) return sortLegalUrlsLast(fromSitemap);
 
   const crawled = await crawlSite(base, {
     maxPages,
-    timeoutMs: FETCH_TIMEOUT_MS,
+    timeoutMs: PAGE_FETCH_TIMEOUT_MS,
     userAgent: DEFAULT_USER_AGENT,
   });
   return sortLegalUrlsLast(crawled);
@@ -268,7 +248,11 @@ export async function runAudit({
 
   await supabase
     .from("audits")
-    .update({ status: "running", engine_version: ENGINE_VERSION })
+    .update({
+      status: "running",
+      engine_version: ENGINE_VERSION,
+      fetch_failures: null,
+    })
     .eq("id", auditId);
 
   devRunnerConsole("runAudit: audits.status -> running", { auditId });
@@ -284,13 +268,24 @@ export async function runAudit({
     hasTargetUrls: Boolean(targetUrls?.length),
     hasShardUrls: Boolean(shardUrls?.length),
   });
-  const [siteWideChecksRaw, cruxFieldChecksRaw, urls] = await Promise.all([
-    runSiteWideChecks(base).catch((): AuditCheck[] => []),
-    runCruxOriginChecks(base).catch((): AuditCheck[] => []),
-    resolveUrls(base, maxPages, shardUrls, targetUrls),
-  ]);
+  const googleChecksPromise =
+    communityId != null
+      ? runGoogleFieldChecks(supabase, communityId, base).catch(() => ({
+          checks: [] as AuditCheck[],
+          metrics: null,
+        }))
+      : Promise.resolve({ checks: [] as AuditCheck[], metrics: null });
+
+  const [siteWideChecksRaw, cruxFieldChecksRaw, urls, googleFieldResult] =
+    await Promise.all([
+      runSiteWideChecks(base).catch((): AuditCheck[] => []),
+      runCruxOriginChecks(base).catch((): AuditCheck[] => []),
+      resolveUrls(base, maxPages, shardUrls, targetUrls),
+      googleChecksPromise,
+    ]);
   let siteWideChecks: AuditCheck[] = siteWideChecksRaw;
   const cruxFieldChecks: AuditCheck[] = cruxFieldChecksRaw;
+  const googleFieldChecks: AuditCheck[] = googleFieldResult.checks;
   devRunnerConsole("runAudit: startup parallel done", {
     auditId,
     urlCount: urls.length,
@@ -310,6 +305,7 @@ export async function runAudit({
     .update({
       site_wide_checks: siteWideChecks,
       crux_field_checks: cruxFieldChecks,
+      google_field_checks: googleFieldChecks,
       progress_total: urls.length,
     })
     .eq("id", auditId);
@@ -349,17 +345,41 @@ export async function runAudit({
   // only need the resolved URL list and are otherwise independent. Previously
   // the category map was awaited before fetching any HTML, adding a full
   // sitemap round-trip to the critical path on every shard-based audit.
-  const [work, categoryByUrl] = await Promise.all([
-    fetchAllHtml(urls),
+  const [{ work, failures: fetchFailures, salvageRecovered }, categoryByUrl] =
+    await Promise.all([
+    fetchAllHtmlForAudit(urls),
     shardUrls && shardUrls.length > 0
       ? buildUrlToSitemapCategoryLabelMap(
           shardUrls,
           base,
-          { timeoutMs: FETCH_TIMEOUT_MS, userAgent: DEFAULT_USER_AGENT },
+          { timeoutMs: PAGE_FETCH_TIMEOUT_MS, userAgent: DEFAULT_USER_AGENT },
           new Set(urls),
         )
       : Promise.resolve(new Map<string, string>()),
   ]);
+
+  if (fetchFailures.length > 0 || salvageRecovered > 0) {
+    if (fetchFailures.length > 0) {
+      await supabase
+        .from("audits")
+        .update({ fetch_failures: fetchFailures })
+        .eq("id", auditId);
+    }
+    observabilityLog.warn("audit.run.partial_fetch", {
+      auditId,
+      planned: urls.length,
+      fetched: work.length,
+      failed: fetchFailures.length,
+      salvageRecovered,
+    });
+    devRunnerConsole("runAudit: fetch_phase_done", {
+      auditId,
+      planned: urls.length,
+      fetched: work.length,
+      failed: fetchFailures.length,
+      salvageRecovered,
+    });
+  }
 
   if (urls.length > 0 && work.length === 0) {
     observabilityLog.warn("audit.run.all_fetch_failed", {
@@ -384,7 +404,10 @@ export async function runAudit({
   }
 
   const crawlGraphChecks = buildCrawlGraphChecks(work, base);
-  siteWideChecks = [...siteWideChecks, ...crawlGraphChecks];
+  const analyticsSiteChecks = buildAnalyticsSiteWideChecks(
+    work.map((w) => ({ url: w.url, html: w.html })),
+  );
+  siteWideChecks = [...siteWideChecks, ...crawlGraphChecks, ...analyticsSiteChecks];
   const nearDuplicateChecks = buildNearDuplicateChecks(work);
   await supabase
     .from("audits")
@@ -529,6 +552,25 @@ export async function runAudit({
   // cleanly with progress_total: 0 so the UI does not show "0 / N complete".
   const finalProgressTotal = pagesCrawled === 0 ? 0 : urls.length;
 
+  let googleMetrics = googleFieldResult.metrics;
+  if (communityId) {
+    try {
+      const synced = await syncGoogleMetricsForCommunity(
+        supabase,
+        communityId,
+        "audit",
+        auditId,
+      );
+      if (synced) googleMetrics = synced;
+    } catch (err) {
+      observabilityLog.warn("audit.google_metrics_sync_failed", {
+        auditId,
+        communityId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   const finalUpdate = await supabase
     .from("audits")
     .update({
@@ -536,6 +578,8 @@ export async function runAudit({
       pages_crawled: pagesCrawled,
       progress_total: finalProgressTotal,
       near_duplicate_checks: nearDuplicateChecks,
+      fetch_failures: fetchFailures.length > 0 ? fetchFailures : null,
+      google_metrics: googleMetrics,
     })
     .eq("id", auditId);
 
@@ -549,26 +593,12 @@ export async function runAudit({
     durationMs: Date.now() - t0,
   });
 
-  // Best-effort Lighthouse top-up: PSI can flake during the main pass
-  // (timeouts, 429/503), and we'd rather quietly retry now while the
-  // runner still holds the lease than make the user click the per-page
-  // button. Capped + spaced inside `retryMissingPsiForAudit`. Errors here
-  // never propagate — the audit is already `status = complete`, and the
-  // manual button + bulk endpoint remain the recourse for anything that
-  // still fails after this pass.
-  try {
-    const psiTop = await retryMissingPsiForAudit(supabase, auditId);
-    if (psiTop.attempted > 0) {
-      observabilityLog.info("audit.run.psi_topup", {
-        auditId,
-        ...psiTop,
-      });
-    }
-  } catch (err) {
-    observabilityLog.warn("audit.run.psi_topup_threw", {
-      auditId,
-      message: err instanceof Error ? err.message : String(err),
-    });
+  // Chained Lighthouse backfill runs in separate `/psi-drain` invocations so
+  // the main run stays within its serverless budget. Kick only when PSI is
+  // configured; failures are logged inside the drain route.
+  if (process.env.PSI_API_KEY?.trim()) {
+    kickPsiDrainFireAndForget(auditId);
+    observabilityLog.info("audit.run.psi_drain_kicked", { auditId });
   }
 }
 

@@ -6,9 +6,8 @@
  *
  *   - **Tier keys** (residence / community / portfolio / partner):
  *     these set `subscriptions.plan` and drive `PLAN_LIMITS_BY_SLUG`.
- *   - **Add-on keys** (`pages_pack_*`): optional second subscription item
- *     that buys extra new-pages-per-month per community on top of any
- *     tier. Each unit of quantity = `PACK_NEW_PAGES_PER_UNIT` new pages.
+ *   - **Add-on keys** (`pages_pack_*`, `runs_pack_*`): optional subscription
+ *     items for extra new-pages/mo and extra manual runs per community.
  */
 
 export const CHECKOUT_TIER_PRICE_KEYS = [
@@ -24,6 +23,8 @@ export const CHECKOUT_TIER_PRICE_KEYS = [
 export const CHECKOUT_ADDON_PRICE_KEYS = [
   "pages_pack_monthly",
   "pages_pack_yearly",
+  "runs_pack_monthly",
+  "runs_pack_yearly",
 ] as const;
 
 export const CHECKOUT_PRICE_KEYS = [
@@ -45,6 +46,8 @@ const ENV_KEY: Record<CheckoutPriceKey, string> = {
   partner_monthly: "STRIPE_PRICE_PARTNER_MONTHLY",
   pages_pack_monthly: "STRIPE_PRICE_PAGES_PACK_MONTHLY",
   pages_pack_yearly: "STRIPE_PRICE_PAGES_PACK_YEARLY",
+  runs_pack_monthly: "STRIPE_PRICE_RUNS_PACK_MONTHLY",
+  runs_pack_yearly: "STRIPE_PRICE_RUNS_PACK_YEARLY",
 };
 
 /** Resolve env var name for a checkout key (for error messages). */

@@ -1,7 +1,17 @@
 import type { Subscription } from "@/types";
 
-/** Stripe statuses that may use paid product flows (audit start, PDF, etc.). */
+/** Stripe statuses that may use paid product flows (audit start, etc.). */
 const ALLOWED_STATUSES = new Set(["active", "trialing"]);
+
+/** PDF download / export requires a paid subscription (not trial). */
+export function userAllowedPdfExport(
+  stripeConfigured: boolean,
+  subscription: Pick<Subscription, "status"> | null | undefined,
+): boolean {
+  if (!stripeConfigured) return true;
+  if (process.env.ALLOW_AUDITS_WITHOUT_SUBSCRIPTION === "1") return true;
+  return subscription?.status === "active";
+}
 
 export function subscriptionRowAllowsProductUse(
   status: string | null | undefined,

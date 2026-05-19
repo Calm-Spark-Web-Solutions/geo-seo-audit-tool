@@ -1,3 +1,5 @@
+import type { CommunityManualResults } from "@/types";
+
 /**
  * Expert human checklist rows (stored per community in `manual_check_results`).
  * Automated crawl/score output lives in deterministic / PSI / CrUX layers.
@@ -12,6 +14,21 @@ export interface ManualTemplateItem {
   label: string;
   /** Extra context for auditors */
   helper?: string;
+}
+
+/** Stable keys for human GEO sign-off (five rows — see docs/VISIBILITY_SCAN_CHECKS.md). */
+export const COMMUNITY_MANUAL_GEO_KEYS = [
+  "geo_content_structure",
+  "geo_content_voice",
+  "geo_content_proof",
+  "geo_niche_offerings",
+  "geo_niche_trust",
+] as const;
+
+export type CommunityManualGeoKey = (typeof COMMUNITY_MANUAL_GEO_KEYS)[number];
+
+export function isCommunityManualGeoKey(key: string): key is CommunityManualGeoKey {
+  return (COMMUNITY_MANUAL_GEO_KEYS as readonly string[]).includes(key);
 }
 
 export const COMMUNITY_MANUAL_ITEMS: ManualTemplateItem[] = [
@@ -137,3 +154,19 @@ export const COMMUNITY_MANUAL_ITEMS: ManualTemplateItem[] = [
       "Trust signals: regulator/agency wording, associations/research cites, authoritative statistics, testimonials/case studies with specifics",
   },
 ];
+
+export const COMMUNITY_MANUAL_GEO_ITEMS: ManualTemplateItem[] =
+  COMMUNITY_MANUAL_ITEMS.filter((item) => isCommunityManualGeoKey(item.key));
+
+/** Count GEO manual rows that have been reviewed (any status other than unreviewed). */
+export function geoManualChecklistProgress(
+  results: CommunityManualResults | null | undefined,
+): { reviewed: number; total: number } {
+  const total = COMMUNITY_MANUAL_GEO_KEYS.length;
+  let reviewed = 0;
+  for (const key of COMMUNITY_MANUAL_GEO_KEYS) {
+    const status = results?.[key]?.status;
+    if (status && status !== "unreviewed") reviewed += 1;
+  }
+  return { reviewed, total };
+}

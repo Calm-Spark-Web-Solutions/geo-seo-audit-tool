@@ -104,6 +104,10 @@ export interface Audit {
   site_wide_checks?: AuditCheck[] | null;
   /** Origin-level Chrome UX Report (CrUX) p75 metrics when fetch succeeds. */
   crux_field_checks?: AuditCheck[] | null;
+  /** GSC/GA4 API checks when Google is connected and properties are mapped. */
+  google_field_checks?: AuditCheck[] | null;
+  /** 28-day GSC/GA4 totals captured when the scan completed. */
+  google_metrics?: GoogleMetricsJson | null;
   /** Cross-page duplicate title / meta description checks; populated after crawl. */
   near_duplicate_checks?: AuditCheck[] | null;
   report_pdf_path: string | null;
@@ -116,6 +120,33 @@ export interface Audit {
   // Explicit per-page URL allowlist. Takes precedence over shard_urls when set.
   target_urls: string[] | null;
   created_at: string;
+  /** When false, does not count toward monthly manual scan quota (tracked-only rescans). */
+  consumes_manual_quota?: boolean;
+  /** Planned URLs whose HTML fetch failed (partial crawls). */
+  fetch_failures?: AuditFetchFailure[] | null;
+}
+
+export interface AuditFetchFailure {
+  url: string;
+  reason: string;
+}
+
+export interface GoogleMetricsJson {
+  gsc_clicks_28d: number;
+  gsc_impressions_28d: number;
+  ga4_sessions_28d: number;
+  ga4_active_users_28d: number;
+}
+
+export interface CommunityGoogleMetricsSnapshot {
+  community_id: string;
+  snapshot_date: string;
+  gsc_clicks_28d: number | null;
+  gsc_impressions_28d: number | null;
+  ga4_sessions_28d: number | null;
+  ga4_active_users_28d: number | null;
+  source: "audit" | "daily_sync";
+  audit_id: string | null;
 }
 
 /** Optional structured p75 sample for Chrome UX Report metric rows (new audits). */
@@ -145,6 +176,12 @@ export interface AuditCheckEvidence {
   /** Total items found; UI shows "+N more" when items.length < totalCount. */
   totalCount?: number;
   items: AuditCheckEvidenceItem[];
+  /**
+   * Nav/header/footer (and other non–primary-content) link samples for the
+   * internal-links inspector. `totalCount` / `items` are in-content links only.
+   */
+  chromeTotalCount?: number;
+  chromeItems?: AuditCheckEvidenceItem[];
   /** Inspector route slug (under per-page audit detail) where the full list lives. */
   inspector?: "links" | "images" | "schema" | "lighthouse";
   /**

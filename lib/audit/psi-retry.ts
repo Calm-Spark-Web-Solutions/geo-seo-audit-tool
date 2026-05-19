@@ -9,12 +9,11 @@
  * consistent.
  *
  * Caller contract:
- *   - `runAudit` (lib/audit/run.ts) calls `retryMissingPsiForAudit` once at
- *     end-of-scan as a best-effort top-up. Failures here MUST NOT mark the
- *     audit as failed; the audit row is already `status = complete`.
- *   - The bulk endpoint at `/api/visibility-scans/[id]/psi-retry` calls the
- *     same function from a user click; rate limiting lives at the HTTP
- *     boundary (not here).
+ *   - `runAudit` (lib/audit/run.ts) kicks `/api/visibility-scans/[id]/psi-drain`
+ *     after `status = complete` for chained background top-up.
+ *   - The bulk endpoint at `/api/visibility-scans/[id]/psi-retry` calls
+ *     `retryMissingPsiForAudit` from a user click; rate limiting lives at the
+ *     HTTP boundary (not here).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -34,6 +33,9 @@ import type { AuditCheck } from "@/types";
  * second button click handles them.
  */
 export const MAX_INLINE_RETRIES = 6;
+
+/** Max chained drain invocations (6 pages × 15 ≈ 90 page attempts). */
+export const MAX_DRAIN_PASSES = 15;
 
 /**
  * Pause between PSI requests. 1.5 s gives Google's per-key rate limiter
@@ -63,6 +65,27 @@ export interface RetryMissingPsiResult {
   stillMissing: number;
   /** Pages we never attempted (e.g. PSI unconfigured or exceeded the cap). */
   skipped: number;
+}
+
+export interface PsiDrainPassResult extends RetryMissingPsiResult {
+  /** Pages still missing Lighthouse after this pass (re-queried). */
+  remaining: number;
+}
+
+/**
+ * Whether the background PSI drain should schedule another pass.
+ * Pure helper — covered by unit tests.
+ */
+export function shouldChainPsiDrain(
+  passIndex: number,
+  pass: Pick<RetryMissingPsiResult, "attempted" | "recovered">,
+  remaining: number,
+): boolean {
+  if (remaining === 0) return false;
+  if (passIndex >= MAX_DRAIN_PASSES - 1) return false;
+  if (pass.attempted === 0) return false;
+  if (pass.attempted > 0 && pass.recovered === 0) return false;
+  return true;
 }
 
 /**
@@ -196,5 +219,22 @@ export async function retryMissingPsiForAudit(
     recovered,
     stillMissing,
     skipped,
+  };
+}
+
+/**
+ * One drain-route pass: run a capped retry batch, then re-count missing pages.
+ */
+export async function runPsiDrainPass(
+  supabase: SupabaseClient,
+  auditId: string,
+  opts: RetryMissingPsiOptions = {},
+): Promise<PsiDrainPassResult> {
+  const result = await retryMissingPsiForAudit(supabase, auditId, opts);
+  const remainingList = await findPagesMissingPsi(supabase, auditId);
+  return {
+    ...result,
+    remaining: remainingList.length,
+    stillMissing: remainingList.length,
   };
 }

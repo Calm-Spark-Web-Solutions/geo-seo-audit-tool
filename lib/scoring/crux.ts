@@ -298,7 +298,7 @@ export async function runCruxOriginChecks(originWebsiteUrl: string): Promise<Aud
       queryCruxCohort(originBase, apiKey, "PHONE"),
       queryCruxCohort(originBase, apiKey, "DESKTOP"),
     ]);
-    return [...phoneChecks, ...desktopChecks];
+    return [...desktopChecks, ...phoneChecks];
   } catch {
     return [
       row(

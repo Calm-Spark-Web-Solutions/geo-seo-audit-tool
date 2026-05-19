@@ -105,13 +105,13 @@ export async function probeBrokenInternalLinks(
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
     try {
-      let res = await fetch(target, {
+      const res = await fetch(target, {
         method: "HEAD",
         redirect: "follow",
         signal: ctrl.signal,
         headers,
       });
-      let status = res.status;
+      const status = res.status;
 
       const retryWithGet =
         status === 405 || status === 501 || status === 401 || status === 403;

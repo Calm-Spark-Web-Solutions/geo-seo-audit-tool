@@ -77,3 +77,68 @@ export function isAuditRunnerConfigured(): boolean {
   const runnerSecret = process.env.AUDIT_RUNNER_SECRET?.trim();
   return Boolean(siteUrl && runnerSecret);
 }
+
+/** Fire-and-forget chained Lighthouse backfill after a scan completes. */
+export function kickPsiDrainFireAndForget(
+  auditId: string,
+  passIndex = 0,
+): void {
+  const siteUrl = resolveSiteUrl();
+  const runnerSecret = process.env.AUDIT_RUNNER_SECRET?.trim();
+  if (!siteUrl || !runnerSecret) {
+    observabilityLog.warn("psi_drain.kick.skipped", {
+      auditId,
+      passIndex,
+      missingSiteUrl: !siteUrl,
+      missingRunnerSecret: !runnerSecret,
+    });
+    return;
+  }
+
+  devRunnerConsole("kick: POST psi-drain", {
+    auditId,
+    passIndex,
+    target: `${siteUrl}/api/visibility-scans/${auditId}/psi-drain`,
+  });
+
+  after(async () => {
+    try {
+      const res = await fetch(
+        `${siteUrl}/api/visibility-scans/${auditId}/psi-drain`,
+        {
+          method: "POST",
+          headers: {
+            "x-audit-runner-token": runnerSecret,
+            "x-psi-drain-pass": String(passIndex),
+            "content-type": "application/json",
+          },
+          cache: "no-store",
+        },
+      );
+      devRunnerConsole("kick: POST psi-drain response", {
+        auditId,
+        passIndex,
+        status: res.status,
+      });
+      if (!res.ok) {
+        observabilityLog.warn("psi_drain.kick.non_2xx", {
+          auditId,
+          passIndex,
+          status: res.status,
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      devRunnerConsole("kick: POST psi-drain failed", {
+        auditId,
+        passIndex,
+        error: message,
+      });
+      observabilityLog.warn("psi_drain.kick.failed", {
+        auditId,
+        passIndex,
+        error: message,
+      });
+    }
+  });
+}

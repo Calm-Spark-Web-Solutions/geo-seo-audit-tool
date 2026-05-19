@@ -7,9 +7,11 @@ export type CruxFormFactorId = "phone" | "desktop";
 export const CRUX_FORM_FACTORS: readonly {
   id: CruxFormFactorId;
   label: string;
+  /** Shown first in the vitals overview; desktop is the default primary cohort. */
+  primary?: boolean;
 }[] = [
+  { id: "desktop", label: "Desktop", primary: true },
   { id: "phone", label: "Mobile (phone)" },
-  { id: "desktop", label: "Desktop" },
 ] as const;
 
 export const CRUX_VITAL_BASE: readonly {

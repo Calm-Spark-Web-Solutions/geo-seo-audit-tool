@@ -12,7 +12,14 @@ import {
   COMMUNITY_QUANTITY_HARD_MIN,
   PACK_PRICING,
   PLAN_LIMITS_BY_SLUG,
+  effectiveMonthlyNewPagesCap,
+  effectiveMonthlyScans,
+  maxAddonPacksPerCommunity,
+  monthlyVolumeDiscountedSubtotal,
+  volumeDiscountFraction,
+  type PlanLimits,
 } from "@/lib/billing/plan-limits";
+import type { CheckoutTierPriceKey } from "@/lib/billing/price-map";
 import {
   PARTNER_PROGRAM,
   PUBLIC_TIERS,
@@ -80,7 +87,26 @@ function defaultQuantityForSubscription(sub: Subscription | null): number {
   return 1;
 }
 
-function defaultPacksForSubscription(sub: Subscription | null): number {
+const ADDON_PACK_UI_MAX = 999;
+
+function checkoutKeyForTierAndCycle(
+  tierId: PublicTierId,
+  cycle: "monthly" | "yearly",
+): CheckoutTierPriceKey {
+  const card = PUBLIC_TIERS.find((t) => t.id === tierId);
+  if (!card) return "community_monthly";
+  return cycle === "monthly" ? card.monthlyKey : card.yearlyKey;
+}
+
+function addonPackUiCap(tierPriceKey: CheckoutTierPriceKey): number {
+  const m = maxAddonPacksPerCommunity(tierPriceKey);
+  return m === null ? ADDON_PACK_UI_MAX : m;
+}
+
+function defaultPacksForSubscription(
+  sub: Subscription | null,
+  tierPriceKey: CheckoutTierPriceKey,
+): number {
   const raw =
     sub?.plan_limits && typeof sub.plan_limits === "object"
       ? (sub.plan_limits as Record<string, unknown>).newPagesPackBonusPerMonth
@@ -88,15 +114,13 @@ function defaultPacksForSubscription(sub: Subscription | null): number {
   if (typeof raw !== "number" || raw <= 0) return 0;
   const packs = Math.floor(raw / PACK_PRICING.newPagesPerUnit);
   if (packs <= 0) return 0;
-  if (packs > PACK_PRICING.hardMaxPacksPerCommunity) {
-    return PACK_PRICING.hardMaxPacksPerCommunity;
-  }
-  return packs;
+  return Math.min(addonPackUiCap(tierPriceKey), packs);
 }
 
-function clampPacks(n: number): number {
+function clampAddonPacks(n: number, tierPriceKey: CheckoutTierPriceKey): number {
   if (!Number.isFinite(n)) return 0;
-  return Math.min(PACK_PRICING.hardMaxPacksPerCommunity, Math.max(0, Math.floor(n)));
+  const cap = addonPackUiCap(tierPriceKey);
+  return Math.min(cap, Math.max(0, Math.floor(n)));
 }
 
 // Mirror of `PORTAL_GATE_STATUSES` in lib/billing/actions.ts. When the
@@ -116,18 +140,25 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
     typeof subscription?.status === "string" &&
     LIVE_SUBSCRIPTION_STATUSES.has(subscription.status);
 
+  const initialTier = defaultTierForSubscription(subscription?.plan);
+  const initialCycle = defaultBillingCycleForSubscription(subscription?.plan);
+  const initialCheckoutKey = checkoutKeyForTierAndCycle(
+    initialTier,
+    initialCycle,
+  );
+
   const [quantity, setQuantity] = useState<number>(() =>
     defaultQuantityForSubscription(subscription),
   );
-  const [cycle, setCycle] = useState<"monthly" | "yearly">(() =>
-    defaultBillingCycleForSubscription(subscription?.plan),
-  );
+  const [cycle, setCycle] = useState<"monthly" | "yearly">(() => initialCycle);
   const [selectedTier, setSelectedTier] = useState<PublicTierId>(() =>
-    defaultTierForSubscription(subscription?.plan),
+    initialTier,
   );
   const [packs, setPacks] = useState<number>(() =>
-    defaultPacksForSubscription(subscription),
+    defaultPacksForSubscription(subscription, initialCheckoutKey),
   );
+
+  const activeCheckoutKey = checkoutKeyForTierAndCycle(selectedTier, cycle);
 
   const quantityInputId = useId();
   const packsInputId = useId();
@@ -150,6 +181,7 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
         cycle={cycle}
         quantity={quantity}
         packsInputId={packsInputId}
+        tierPriceKey={activeCheckoutKey}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -187,18 +219,23 @@ function PagePackControls({
   cycle,
   quantity,
   packsInputId,
+  tierPriceKey,
 }: {
   packs: number;
   setPacks: (n: number) => void;
   cycle: "monthly" | "yearly";
   quantity: number;
   packsInputId: string;
+  tierPriceKey: CheckoutTierPriceKey;
 }) {
+  const packCap = addonPackUiCap(tierPriceKey);
   const unit =
     cycle === "monthly" ? PACK_PRICING.unitMonthlyUsd : PACK_PRICING.unitYearlyUsd;
   const unitSuffix = cycle === "monthly" ? "/mo" : "/yr";
   const bonusPerCommunity = packs * PACK_PRICING.newPagesPerUnit;
   const totalAddOn = packs * quantity * unit;
+
+  const maxTierPacks = maxAddonPacksPerCommunity(tierPriceKey);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border bg-card/40 p-4 sm:flex-row sm:items-end sm:justify-between">
@@ -214,7 +251,7 @@ function PagePackControls({
               variant="ghost"
               aria-label="Remove one page pack"
               disabled={packs <= 0}
-              onClick={() => setPacks(clampPacks(packs - 1))}
+              onClick={() => setPacks(clampAddonPacks(packs - 1, tierPriceKey))}
             >
               <Minus className="h-4 w-4" />
             </Button>
@@ -223,10 +260,15 @@ function PagePackControls({
               type="number"
               inputMode="numeric"
               min={0}
-              max={PACK_PRICING.hardMaxPacksPerCommunity}
+              max={packCap}
               value={packs}
               onChange={(e) =>
-                setPacks(clampPacks(Number.parseInt(e.target.value, 10)))
+                setPacks(
+                  clampAddonPacks(
+                    Number.parseInt(e.target.value, 10),
+                    tierPriceKey,
+                  ),
+                )
               }
               className="w-16 bg-transparent text-center text-sm font-medium tabular-nums outline-none"
             />
@@ -235,8 +277,8 @@ function PagePackControls({
               size="icon"
               variant="ghost"
               aria-label="Add one page pack"
-              disabled={packs >= PACK_PRICING.hardMaxPacksPerCommunity}
-              onClick={() => setPacks(clampPacks(packs + 1))}
+              disabled={packs >= packCap}
+              onClick={() => setPacks(clampAddonPacks(packs + 1, tierPriceKey))}
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -245,6 +287,9 @@ function PagePackControls({
             +{PACK_PRICING.newPagesPerUnit} new pages / community / month per
             pack · {formatUsd(unit)}
             {unitSuffix} per pack per community
+            {maxTierPacks !== null
+              ? ` · max ${maxTierPacks} packs on this tier`
+              : null}
           </p>
         </div>
       </div>
@@ -262,7 +307,7 @@ function PagePackControls({
           </>
         ) : (
           <span className="block">
-            Optional. Stack as many packs as you need; rescans stay free.
+            Optional. Stack packs up to your tier cap; rescans stay free.
           </span>
         )}
       </div>
@@ -400,6 +445,18 @@ function TierCard({
   hasLiveSubscription: boolean;
 }) {
   const limits = PLAN_LIMITS_BY_SLUG[tier.monthlyKey];
+  const priceKey = cycle === "monthly" ? tier.monthlyKey : tier.yearlyKey;
+  const pagePacksForTier = clampAddonPacks(packs, priceKey);
+
+  const limitsWithAddons: PlanLimits = {
+    ...limits,
+    newPagesPackBonusPerMonth:
+      limits.newPagesPerCommunityMonth === null
+        ? null
+        : pagePacksForTier * PACK_PRICING.newPagesPerUnit,
+    monthlyScansPackBonusPerMonth:
+      limits.monthlyScans === null ? null : 0,
+  };
 
   const unitPrice =
     cycle === "monthly" ? tier.monthlyUnitUsd : tier.yearlyUnitUsd;
@@ -407,24 +464,26 @@ function TierCard({
   const packUnit =
     cycle === "monthly" ? PACK_PRICING.unitMonthlyUsd : PACK_PRICING.unitYearlyUsd;
 
-  const tierTotal = useMemo(() => unitPrice * quantity, [unitPrice, quantity]);
-  const packTotal = useMemo(
-    () => packs * quantity * packUnit,
-    [packs, quantity, packUnit],
+  const tierSubtotal = useMemo(
+    () => monthlyVolumeDiscountedSubtotal(unitPrice, quantity),
+    [unitPrice, quantity],
   );
-  const total = tierTotal + packTotal;
+  const listTierNoDiscount = useMemo(
+    () => unitPrice * quantity,
+    [unitPrice, quantity],
+  );
+  const discountFrac = volumeDiscountFraction(quantity);
+  const packTotal = useMemo(
+    () => pagePacksForTier * quantity * packUnit,
+    [pagePacksForTier, quantity, packUnit],
+  );
+  const total = tierSubtotal + packTotal;
 
-  const priceKey = cycle === "monthly" ? tier.monthlyKey : tier.yearlyKey;
-
+  const scansBudget = effectiveMonthlyScans(limitsWithAddons, quantity);
   const totalScans =
-    limits.monthlyScans === null
-      ? "Unlimited"
-      : (limits.monthlyScans * quantity).toLocaleString();
-  const baseNewPages = limits.newPagesPerCommunityMonth ?? null;
-  const effectiveNewPages =
-    baseNewPages === null
-      ? null
-      : baseNewPages + packs * PACK_PRICING.newPagesPerUnit;
+    scansBudget === null ? "Unlimited" : scansBudget.toLocaleString();
+
+  const effectiveNewPages = effectiveMonthlyNewPagesCap(limitsWithAddons);
 
   return (
     <Card
@@ -461,6 +520,12 @@ function TierCard({
             <span className="text-xs text-muted-foreground">
               {formatUsd(unitPrice)}
               {unitSuffix} / community
+              {discountFrac > 0 ? (
+                <span className="mt-0.5 block text-[10px] text-emerald-600">
+                  Includes {Math.round(discountFrac * 100)}% volume discount at{" "}
+                  {quantity} communities (Stripe tier prices should match).
+                </span>
+              ) : null}
             </span>
             <span className="text-2xl font-semibold tabular-nums">
               {formatUsd(total)}
@@ -469,22 +534,31 @@ function TierCard({
               </span>
             </span>
           </div>
+          {discountFrac > 0 && listTierNoDiscount > tierSubtotal ? (
+            <p className="text-[11px] text-muted-foreground">
+              Tier line list {formatUsd(listTierNoDiscount)}
+              {unitSuffix} → after volume discount {formatUsd(tierSubtotal)}
+              {unitSuffix}; add-ons at list price.
+            </p>
+          ) : null}
 
           <div className="space-y-0.5 text-xs text-muted-foreground">
             <p>
               {quantity} {quantity === 1 ? "community" : "communities"}
               {" · "}
-              {totalScans} audit starts / mo (across all communities)
+              {totalScans} manual audit runs / mo (across all communities)
             </p>
-            {packs > 0 && effectiveNewPages !== null ? (
+            {pagePacksForTier > 0 && effectiveNewPages !== null ? (
               <p>
                 <span className="text-foreground">
                   {effectiveNewPages.toLocaleString()} new pages / community / mo
                 </span>
                 {" "}
                 <span>
-                  ({baseNewPages?.toLocaleString()} base + {packs} pack{packs === 1 ? "" : "s"}
-                  {" "}× {PACK_PRICING.newPagesPerUnit})
+                  (
+                  {(limits.newPagesPerCommunityMonth ?? 0).toLocaleString()} base
+                  + {pagePacksForTier} pack{pagePacksForTier === 1 ? "" : "s"} ×{" "}
+                  {PACK_PRICING.newPagesPerUnit})
                 </span>
               </p>
             ) : null}
@@ -512,7 +586,7 @@ function TierCard({
               <input
                 type="hidden"
                 name="pagesPackQuantity"
-                value={String(packs)}
+                value={String(pagePacksForTier)}
               />
               <Button
                 type="submit"
@@ -533,7 +607,7 @@ function TierCard({
         {billingBlocked
           ? "Checkout is temporarily unavailable. Please contact support."
           : hasLiveSubscription
-            ? "Change quantity, tier, or Page Packs on your existing subscription \u2014 no duplicate charges."
+            ? "Change quantity, tier, or add-ons on your existing subscription \u2014 no duplicate charges."
             : null}
       </CardFooter>
     </Card>

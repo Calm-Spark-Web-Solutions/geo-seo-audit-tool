@@ -9,17 +9,17 @@ import {
   CruxVitalsOverview,
   hasCruxHistogramMetrics,
 } from "@/components/audits/CruxVitalsOverview";
+import { AuditSection } from "@/components/audits/AuditSection";
 import { CheckList } from "@/components/audits/CheckList";
 import { AuditPageRow } from "@/components/audits/AuditPageRow";
 import { AuditScoreCard } from "@/components/audits/AuditScoreCard";
+import { PartialCrawlBanner } from "@/components/audits/PartialCrawlBanner";
+import { PsiCoveragePanel } from "@/components/audits/PsiCoveragePanel";
 import type { RemoveAuditPageSuccess } from "@/app/(dashboard)/visibility-scans/[id]/pages/[pageId]/actions";
+import { GoogleMetricsCard } from "@/components/communities/GoogleMetricsCard";
 import { EmptyState } from "@/components/layout/EmptyState";
-import {
-  Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { isPartialCrawl, partialCrawlFailedCount } from "@/lib/audit/partial-crawl";
+import { psiCoverageFromPages } from "@/lib/audit/psi-keys";
 import type { Audit, AuditCheck, AuditPage, AuditQueueDiagnostics } from "@/types";
 import { categoryLabelSortKey } from "@/lib/crawler/shard-labels";
 
@@ -56,12 +56,6 @@ function partitionAuditPagesByCategory(
   }));
 }
 
-// Adaptive polling cadence. Most audits finish well within the first
-// minute, so the dense 2 s tempo is what the user actually sees. After
-// that we step down to 5 s (30 s in) and 10 s (2 min in) to keep the
-// snapshot egress + function-invocation cost bounded for runs that drag.
-// Returning to the tab resets the timer back to 2 s — see the
-// visibilitychange handler below.
 const POLL_FAST_MS = 2000;
 const POLL_MEDIUM_MS = 5000;
 const POLL_SLOW_MS = 10_000;
@@ -91,9 +85,6 @@ export function AuditDetailLive({
   priorByUrl?: Record<string, PriorPageSnapshot>;
   initialQueue?: AuditQueueDiagnostics | null;
 }) {
-  // Note: the parent passes `key={typedAudit.id}`, so this component remounts
-  // when the audit id changes. That means useState/useRef seeds always reflect
-  // the new audit and polling restarts cleanly — no manual reset effect needed.
   const [audit, setAudit] = useState<Audit>(initialAudit);
   const [pages, setPages] = useState<AuditPage[]>(initialPages);
   const [queue, setQueue] = useState<AuditQueueDiagnostics | null>(
@@ -108,10 +99,12 @@ export function AuditDetailLive({
   const startedFlag = searchParams.get("started");
   const resumedFlag = searchParams.get("resumed");
 
+  const isComplete = audit.status === "complete";
+  const partialCrawl = isComplete && isPartialCrawl(audit);
+  const psi = useMemo(() => psiCoverageFromPages(pages), [pages]);
+  const psiMissing = psi.total > 0 && psi.covered < psi.total;
+
   useEffect(() => {
-    // Stable per-audit toast id so sonner dedupes if the effect runs more than
-    // once on mount (React Strict Mode in dev double-invokes effects; without
-    // an id we'd render two identical "Audit started" toasts).
     if (startedFlag === "1") {
       toast.success("Audit started", {
         id: `audit-started:${initialAudit.id}`,
@@ -123,7 +116,6 @@ export function AuditDetailLive({
         id: `audit-resumed:${initialAudit.id}`,
       });
     }
-    // Only run on first paint per audit detail mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -136,8 +128,6 @@ export function AuditDetailLive({
     const inFlightRef = { current: false };
     const failuresRef = { current: 0 };
     let toastedFailure = false;
-    // Reset by visibilitychange so coming back to the tab restarts the
-    // dense polling tempo even on long-running audits.
     let pollStartedAt = Date.now();
 
     const scheduleNext = (delay?: number) => {
@@ -147,10 +137,6 @@ export function AuditDetailLive({
     };
 
     const fetchFullOnce = async () => {
-      // One final rich payload so the per-page summary lines (pass / warn /
-      // fail / fixes) populate after a run finishes. Failures here are
-      // non-fatal: the user can refresh the page if they really want the
-      // full breakdown.
       try {
         const res = await fetch(`/api/visibility-scans/${initialAudit.id}/snapshot`, {
           cache: "no-store",
@@ -167,17 +153,13 @@ export function AuditDetailLive({
         setPages(json.pages);
         if ("queue" in json) setQueue(json.queue ?? null);
       } catch {
-        // Silent — the live polling loop is already done; the user has
-        // a stable terminal screen even without the rich summaries.
+        // non-fatal
       }
     };
 
     const tick = async () => {
       if (cancelled || stoppedRef.current) return;
-      if (typeof document !== "undefined" && document.hidden) {
-        // Pause while hidden; visibilitychange below will resume.
-        return;
-      }
+      if (typeof document !== "undefined" && document.hidden) return;
       if (inFlightRef.current) {
         scheduleNext();
         return;
@@ -186,10 +168,7 @@ export function AuditDetailLive({
       try {
         const res = await fetch(
           `/api/visibility-scans/${initialAudit.id}/snapshot?mode=light`,
-          {
-            cache: "no-store",
-            signal: controller.signal,
-          },
+          { cache: "no-store", signal: controller.signal },
         );
         if (!res.ok) {
           failuresRef.current += 1;
@@ -210,9 +189,6 @@ export function AuditDetailLive({
         if (cancelled) return;
         failuresRef.current = 0;
         toastedFailure = false;
-        // Merge so heavier audit fields (site_wide_checks, crux_field_checks)
-        // hydrated from the initial server render survive light polls that
-        // don't include them.
         setAudit((prev) => ({ ...prev, ...json.audit }));
         setPages(json.pages);
         if ("queue" in json) setQueue(json.queue ?? null);
@@ -238,7 +214,6 @@ export function AuditDetailLive({
     const onVisibility = () => {
       if (cancelled || stoppedRef.current) return;
       if (!document.hidden) {
-        // User came back — give them the fastest cadence again.
         pollStartedAt = Date.now();
         if (timeoutId) clearTimeout(timeoutId);
         void tick();
@@ -266,53 +241,88 @@ export function AuditDetailLive({
       : [];
   }, [audit.site_wide_checks]);
 
-  const cruxField =
-    Array.isArray(audit.crux_field_checks) ? (audit.crux_field_checks as AuditCheck[]) : [];
+  const cruxField = Array.isArray(audit.crux_field_checks)
+    ? (audit.crux_field_checks as AuditCheck[])
+    : [];
+
+  const googleField = Array.isArray(audit.google_field_checks)
+    ? (audit.google_field_checks as AuditCheck[])
+    : [];
+
+  const gscMapped = googleField.some(
+    (c) => c.key === "gsc_property_linked" && c.result === "pass",
+  );
+  const ga4Mapped = googleField.some(
+    (c) => c.key === "ga4_property_linked" && c.result === "pass",
+  );
+  const showGoogleMetricsCard =
+    isComplete &&
+    (audit.google_metrics != null ||
+      gscMapped ||
+      ga4Mapped ||
+      googleField.length > 0);
+
   return (
-    <>
+    <div className="flex flex-col gap-4">
       <AuditScoreCard audit={audit} queue={queue} />
 
+      {showGoogleMetricsCard ? (
+        <GoogleMetricsCard
+          metrics={audit.google_metrics ?? null}
+          mapped={{ gsc: gscMapped, ga4: ga4Mapped }}
+          variant="audit"
+          asOf={audit.created_at}
+        />
+      ) : null}
+
+      {partialCrawl ? (
+        <PartialCrawlBanner
+          audit={audit}
+          communityId={audit.community_id}
+        />
+      ) : null}
+
       {siteWide.length > 0 ? (
-        <Card>
-          <CardHeader className="pb-0">
-            <CardTitle className="text-base">Site-wide probes</CardTitle>
-            <CardDescription>
-              Domain-wide signals (robots.txt, sitemap, AI bot rules) plus crawl-graph metrics for{" "}
-              <strong className="font-medium text-foreground">URLs in this scan</strong> (orphans, depth from seed,
-              anchor-text quality). Expand a row to see evidence such as orphan URLs.
-            </CardDescription>
-          </CardHeader>
-          <div className="px-4 pb-4 sm:px-6">
-            <CheckList title="" checks={siteWide} explanationLayout="collapsible" />
-          </div>
-        </Card>
+        <AuditSection
+          title="Site-wide probes"
+          description="Robots, sitemap, AI bot rules, and crawl-graph signals for URLs in this scan."
+          badge={`${siteWide.length} checks`}
+          defaultOpen={false}
+        >
+          <CheckList title="" checks={siteWide} explanationLayout="collapsible" />
+        </AuditSection>
+      ) : null}
+
+      {googleField.length > 0 ? (
+        <AuditSection
+          title="Google Search Console & GA4"
+          description="Property linkage and 28-day signals when your organization has Google connected."
+          badge={`${googleField.length} checks`}
+          defaultOpen={false}
+        >
+          <CheckList title="" checks={googleField} explanationLayout="collapsible" />
+        </AuditSection>
       ) : null}
 
       {cruxField.length > 0 ? (
-        <Card>
-          <CardHeader className="pb-0">
-            <CardTitle className="text-base">Chrome UX Report (field data)</CardTitle>
-            <CardDescription>
-              Real-user data from Google for your site&apos;s <strong className="font-medium text-foreground">origin</strong>{" "}
-              (hostname)—not per URL. Numbers below are typical experiences (often p75).{" "}
-              <strong className="font-medium text-foreground">Green is good; red needs attention.</strong>{" "}
-              Powered by Google&apos;s real-user measurement data.
-            </CardDescription>
-          </CardHeader>
-          <div className="flex flex-col gap-4 px-4 pb-4 sm:px-6">
+        <AuditSection
+          title="Core Web Vitals (CrUX)"
+          description="Real-user origin data from Google. Desktop is primary."
+          defaultOpen={hasCruxHistogramMetrics(cruxField)}
+        >
+          <div className="flex flex-col gap-3">
             {hasCruxHistogramMetrics(cruxField) ? (
-              <CruxVitalsOverview checks={cruxField} />
+              <CruxVitalsOverview
+                checks={cruxField}
+                compact
+                collapseMobile
+              />
             ) : null}
-            <details
-              className="rounded-lg border border-border bg-muted/25"
-              open={!hasCruxHistogramMetrics(cruxField)}
-            >
-              <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-foreground">
-                {hasCruxHistogramMetrics(cruxField)
-                  ? "Full breakdown and detailed improvement tips"
-                  : "Details"}
+            <details className="rounded-md border border-border bg-muted/20">
+              <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-foreground">
+                Full breakdown and tips
               </summary>
-              <div className="border-t border-border px-4 pb-4 pt-2">
+              <div className="border-t border-border px-3 pb-3 pt-2">
                 <CheckList
                   title=""
                   checks={cruxField}
@@ -321,11 +331,32 @@ export function AuditDetailLive({
               </div>
             </details>
           </div>
-        </Card>
+        </AuditSection>
       ) : null}
 
-      <div className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Pages</h2>
+      {isComplete && psiMissing ? (
+        <AuditSection
+          title="Lighthouse gaps"
+          description={`${psi.total - psi.covered} page${psi.total - psi.covered === 1 ? "" : "s"} missing PageSpeed data`}
+          badge={`${psi.covered}/${psi.total}`}
+          defaultOpen={false}
+        >
+          <PsiCoveragePanel auditId={audit.id} pages={pages} />
+        </AuditSection>
+      ) : null}
+
+      <AuditSection
+        title="Scored pages"
+        description="Open a row for checks, fixes, and Lighthouse."
+        badge={
+          pages.length > 0
+            ? `${pages.length} scored`
+            : partialCrawl
+              ? `${audit.pages_crawled} / ${(audit.progress_total ?? 0) + partialCrawlFailedCount(audit)} planned`
+              : undefined
+        }
+        defaultOpen
+      >
         {pages.length === 0 ? (
           <EmptyState
             icon={FileSearch}
@@ -341,55 +372,47 @@ export function AuditDetailLive({
             }
           />
         ) : (
-          <Card>
-            <CardHeader className="pb-0">
-              <CardTitle className="text-base">Scanned URLs</CardTitle>
-              <CardDescription>
-                Click a row for the full breakdown — checks and suggested fixes.
-              </CardDescription>
-            </CardHeader>
-            <div className="px-4 pb-2 sm:px-6">
-              {pageGroups.map((group, idx) => (
-                <div
-                  key={group.label}
-                  className={idx > 0 ? "mt-6 border-t border-border pt-6" : undefined}
-                >
-                  <h3 className="mb-2 text-sm font-semibold text-foreground">
-                    {group.label}
-                    <span className="ml-2 font-normal text-muted-foreground">
-                      ({group.items.length})
-                    </span>
-                  </h3>
-                  <div>
-                    {group.items.map((p) => (
-                      <AuditPageRow
-                        key={p.id}
-                        auditId={audit.id}
-                        page={p}
-                        prior={priorByUrl?.[p.url]}
-                        removeEnabled={isTerminal(audit.status)}
-                        onRemoved={(rollup: RemoveAuditPageSuccess) => {
-                          setPages((prev) =>
-                            prev.filter((row) => row.id !== p.id),
-                          );
-                          setAudit((prev) => ({
-                            ...prev,
-                            seo_score: rollup.seo_score,
-                            geo_score: rollup.geo_score,
-                            score: rollup.score,
-                            pages_crawled: rollup.pages_crawled,
-                            progress_total: rollup.progress_total,
-                          }));
-                        }}
-                      />
-                    ))}
-                  </div>
+          <div className="flex flex-col gap-4">
+            {pageGroups.map((group, idx) => (
+              <div
+                key={group.label}
+                className={idx > 0 ? "border-t border-border pt-4" : undefined}
+              >
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {group.label}
+                  <span className="ml-1.5 font-normal normal-case">
+                    ({group.items.length})
+                  </span>
+                </h3>
+                <div>
+                  {group.items.map((p) => (
+                    <AuditPageRow
+                      key={p.id}
+                      auditId={audit.id}
+                      page={p}
+                      prior={priorByUrl?.[p.url]}
+                      removeEnabled={isTerminal(audit.status)}
+                      onRemoved={(rollup: RemoveAuditPageSuccess) => {
+                        setPages((prev) =>
+                          prev.filter((row) => row.id !== p.id),
+                        );
+                        setAudit((prev) => ({
+                          ...prev,
+                          seo_score: rollup.seo_score,
+                          geo_score: rollup.geo_score,
+                          score: rollup.score,
+                          pages_crawled: rollup.pages_crawled,
+                          progress_total: rollup.progress_total,
+                        }));
+                      }}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
-          </Card>
+              </div>
+            ))}
+          </div>
         )}
-      </div>
-    </>
+      </AuditSection>
+    </div>
   );
 }

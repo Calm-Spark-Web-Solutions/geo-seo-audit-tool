@@ -16,6 +16,18 @@ import type { AuditCheckEvidenceItem } from "@/types";
 
 export const dynamic = "force-dynamic";
 
+type LinkItem = Extract<AuditCheckEvidenceItem, { type: "link" }>;
+
+function linkItemsFrom(
+  items: AuditCheckEvidenceItem[] | undefined,
+): LinkItem[] {
+  return (
+    items?.filter(
+      (i): i is LinkItem => i.type === "link",
+    ) ?? []
+  );
+}
+
 export default async function InternalLinksInspectorPage({
   params,
 }: {
@@ -25,15 +37,14 @@ export default async function InternalLinksInspectorPage({
   const ctx = await loadInspectorContext({ auditId, pageId });
   const match = findInspectorEvidence(ctx.checks, "links", ["internal_links"]);
 
-  const items: Extract<AuditCheckEvidenceItem, { type: "link" }>[] =
-    match?.evidence.items.filter(
-      (i): i is Extract<AuditCheckEvidenceItem, { type: "link" }> =>
-        i.type === "link",
-    ) ?? [];
-  const totalCount = match?.evidence.totalCount ?? items.length;
+  const contentItems = linkItemsFrom(match?.evidence.items);
+  const chromeItems = linkItemsFrom(match?.evidence.chromeItems);
+  const contentTotal = match?.evidence.totalCount ?? contentItems.length;
+  const chromeTotal = match?.evidence.chromeTotalCount ?? chromeItems.length;
+  const hasSamples = contentItems.length > 0 || chromeItems.length > 0;
 
   const hostBreakdown = new Map<string, number>();
-  for (const it of items) {
+  for (const it of [...contentItems, ...chromeItems]) {
     try {
       const host = new URL(it.url).host;
       hostBreakdown.set(host, (hostBreakdown.get(host) ?? 0) + 1);
@@ -53,13 +64,18 @@ export default async function InternalLinksInspectorPage({
         title="Internal links"
         description={
           <span>
-            {totalCount} link{totalCount === 1 ? "" : "s"} captured
-            {items.length < totalCount ? ` (showing ${items.length} sample)` : ""}
+            {contentTotal} in-content link{contentTotal === 1 ? "" : "s"}
+            {chromeTotal > 0
+              ? ` · ${chromeTotal} in navigation or footer`
+              : ""}
+            {contentItems.length < contentTotal
+              ? ` (showing ${contentItems.length} in-content sample${contentItems.length === 1 ? "" : "s"})`
+              : ""}
           </span>
         }
       />
 
-      {items.length === 0 ? (
+      {!hasSamples ? (
         <EmptyState
           icon={LinkIcon}
           title="Sample data not captured"
@@ -71,25 +87,27 @@ export default async function InternalLinksInspectorPage({
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Summary</CardTitle>
               <CardDescription>
-                Breakdown of unique destinations seen on this page.
+                In-content links are inside primary page content (not global
+                navigation or footer). These are the links that usually help
+                readers and AI crawlers discover related topics.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <dl className="grid gap-2 sm:grid-cols-2">
                 <div className="rounded-md border border-border bg-card px-4 py-3">
                   <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Total internal links
+                    In-content links
                   </dt>
                   <dd className="mt-1 text-3xl font-bold tabular-nums text-foreground">
-                    {totalCount}
+                    {contentTotal}
                   </dd>
                 </div>
                 <div className="rounded-md border border-border bg-card px-4 py-3">
                   <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Unique sample
+                    Navigation &amp; footer
                   </dt>
                   <dd className="mt-1 text-3xl font-bold tabular-nums text-foreground">
-                    {items.length}
+                    {chromeTotal}
                   </dd>
                 </div>
               </dl>
@@ -111,7 +129,33 @@ export default async function InternalLinksInspectorPage({
             </CardContent>
           </Card>
 
-          <InspectorLinksTable items={items} />
+          {contentItems.length > 0 ? (
+            <InspectorLinksTable
+              items={contentItems}
+              title="In-content links"
+              description="Contextual links inside primary page content — these count toward the internal links check."
+            />
+          ) : (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">In-content links</CardTitle>
+                <CardDescription>
+                  No in-content internal links were found on this page. Add
+                  contextual links in the body to related services, resources,
+                  and next steps.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
+
+          {chromeItems.length > 0 ? (
+            <InspectorLinksTable
+              items={chromeItems}
+              title="Navigation & footer"
+              description="Global site chrome — shown for reference; these do not count toward the internal links score."
+              className="opacity-90"
+            />
+          ) : null}
         </>
       )}
     </>

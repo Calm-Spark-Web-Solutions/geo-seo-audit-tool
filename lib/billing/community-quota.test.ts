@@ -15,6 +15,7 @@ const limitedCtx: BillingContext = {
     pagesPerCommunity: 50,
     newPagesPerCommunityMonth: 20,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
   companyIds: ["co1"],
 };
@@ -28,6 +29,7 @@ const unlimitedCtx: BillingContext = {
     pagesPerCommunity: null,
     newPagesPerCommunityMonth: null,
     newPagesPackBonusPerMonth: null,
+    monthlyScansPackBonusPerMonth: null,
   },
   companyIds: [],
 };

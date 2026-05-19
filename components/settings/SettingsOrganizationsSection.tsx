@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { googleMappingStatus } from "@/lib/integrations/google/google-properties-ui";
 import { createClient } from "@/lib/supabase/server";
 import type { CompanyRole } from "@/types";
 
@@ -56,13 +57,76 @@ export async function SettingsOrganizationsSection() {
   }
 
   const list = (rows ?? []) as unknown as Row[];
+  const companyIds = list.map((r) => r.company_id);
+
+  const { data: googleConnections } =
+    companyIds.length > 0
+      ? await supabase
+          .from("company_google_connections")
+          .select("company_id, google_account_email")
+          .in("company_id", companyIds)
+      : { data: [] };
+
+  const { data: communityRows } =
+    companyIds.length > 0
+      ? await supabase
+          .from("communities")
+          .select("id, company_id")
+          .in("company_id", companyIds)
+      : { data: [] };
+
+  const communityIds = (communityRows ?? []).map((c) => c.id as string);
+  const { data: googlePropsRows } =
+    communityIds.length > 0
+      ? await supabase
+          .from("community_google_properties")
+          .select("community_id, gsc_site_url, ga4_property_id")
+          .in("community_id", communityIds)
+      : { data: [] };
+
+  const propsByCommunity = new Map(
+    (googlePropsRows ?? []).map((p) => [
+      p.community_id as string,
+      {
+        gsc: p.gsc_site_url as string | null,
+        ga4: p.ga4_property_id as string | null,
+      },
+    ]),
+  );
+
+  const googleByCompany = new Map<
+    string,
+    { connected: boolean; mapped: number; total: number }
+  >();
+  for (const cid of companyIds) {
+    googleByCompany.set(cid, { connected: false, mapped: 0, total: 0 });
+  }
+  for (const conn of googleConnections ?? []) {
+    const entry = googleByCompany.get(conn.company_id as string);
+    if (entry) entry.connected = true;
+  }
+  for (const c of communityRows ?? []) {
+    const companyId = c.company_id as string;
+    const entry = googleByCompany.get(companyId);
+    if (!entry) continue;
+    entry.total += 1;
+    const props = propsByCommunity.get(c.id as string);
+    if (googleMappingStatus(props?.gsc, props?.ga4) === "mapped") {
+      entry.mapped += 1;
+    }
+  }
+
   const orgs = list.map((r) => {
     const role = r.role as CompanyRole;
+    const google = googleByCompany.get(r.company_id);
     return {
       id: r.company_id,
       name: companyFromRow(r)?.name ?? "Organization",
       role,
       canEdit: role === "owner" || role === "admin",
+      googleConnected: google?.connected ?? false,
+      googleMapped: google?.mapped ?? 0,
+      googleTotal: google?.total ?? 0,
     };
   });
 
@@ -111,11 +175,52 @@ export async function SettingsOrganizationsSection() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">{o.name}</CardTitle>
                   <CardDescription>Your role: {roleLabel(o.role)}</CardDescription>
+                  {o.canEdit ? (
+                    <p className="text-sm text-muted-foreground">
+                      Google:{" "}
+                      {o.googleConnected ? (
+                        <>
+                          Connected
+                          {o.googleTotal > 0 ? (
+                            <>
+                              {" · "}
+                              <span className="tabular-nums">
+                                {o.googleMapped}/{o.googleTotal}
+                              </span>{" "}
+                              mapped
+                            </>
+                          ) : null}
+                          {" · "}
+                          <a
+                            href={`/companies/${o.id}#google-integrations`}
+                            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+                          >
+                            Manage properties
+                          </a>
+                        </>
+                      ) : (
+                        <>
+                          Not connected ·{" "}
+                          <a
+                            href={`/api/integrations/google/connect?company_id=${encodeURIComponent(o.id)}&return_to=${encodeURIComponent(`/companies/${o.id}`)}`}
+                            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+                          >
+                            Connect Google
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  ) : null}
                 </CardHeader>
                 <CardContent className="flex flex-wrap gap-2 pt-0">
                   <Button variant="secondary" size="sm" asChild>
-                    <Link href={`/companies/${o.id}`}>Open</Link>
+                    <Link href={`/companies/${o.id}`}>Open organization</Link>
                   </Button>
+                  {o.canEdit && o.googleConnected ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <a href={`/companies/${o.id}#google-integrations`}>Google setup</a>
+                    </Button>
+                  ) : null}
                   {o.canEdit ? (
                     <Button variant="outline" size="sm" asChild>
                       <Link href={`/companies/${o.id}/edit`}>Edit</Link>

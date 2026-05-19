@@ -9,6 +9,7 @@ import {
   PACK_PRICING,
   PLAN_LIMITS_BY_SLUG,
   resolvePlanLimits,
+  RUNS_PACK_PRICING,
   TIER_PRICING,
   UNLIMITED_PLAN_LIMITS,
 } from "./plan-limits";
@@ -33,6 +34,7 @@ describe("plan-limits", () => {
       newPagesPerCommunityMonth: "bad" as unknown as number,
       communities: -1,
       newPagesPackBonusPerMonth: 75,
+      monthlyScansPackBonusPerMonth: 20,
     });
     expect(next.monthlyScans).toBe(500);
     expect(next.pagesPerCommunity).toBeNull();
@@ -45,12 +47,12 @@ describe("plan-limits", () => {
     // Pack bonus is mirrored from the override (this is how the webhook
     // persists Page Pack purchases — see `app/api/stripe/webhook/route.ts`).
     expect(next.newPagesPackBonusPerMonth).toBe(75);
+    expect(next.monthlyScansPackBonusPerMonth).toBe(20);
   });
 
   it("formatPlanLimitsShort renders per-community knobs (community count is excluded)", () => {
-    // Unlimited everything → 3 'unlimited' phrases in card order.
     expect(formatPlanLimitsShort(UNLIMITED_PLAN_LIMITS)).toBe(
-      "Unlimited pages tracked · unlimited new pages/mo · unlimited audit starts",
+      "Unlimited pages tracked · Unlimited manual audit runs/mo · 1 free auto rescan/mo",
     );
 
     expect(
@@ -60,8 +62,9 @@ describe("plan-limits", () => {
         pagesPerCommunity: 50,
         newPagesPerCommunityMonth: 20,
         newPagesPackBonusPerMonth: 0,
+        monthlyScansPackBonusPerMonth: 0,
       }),
-    ).toBe("50 pages tracked · 20 new pages/mo · 10 audit starts/mo");
+    ).toBe("50 pages tracked · 10 manual audit runs/mo · 1 free auto rescan/mo");
 
     // Large numbers should be locale-formatted with thousands separators.
     expect(
@@ -71,8 +74,9 @@ describe("plan-limits", () => {
         pagesPerCommunity: 1500,
         newPagesPerCommunityMonth: 1500,
         newPagesPackBonusPerMonth: 0,
+        monthlyScansPackBonusPerMonth: 0,
       }),
-    ).toBe("1,500 pages tracked · 1,500 new pages/mo · 1,500 audit starts/mo");
+    ).toBe("1,500 pages tracked · 1,500 manual audit runs/mo · 1 free auto rescan/mo");
   });
 
   it("effectiveMonthlyScans scales per-community budget by community count", () => {
@@ -86,6 +90,14 @@ describe("plan-limits", () => {
     expect(effectiveMonthlyScans(UNLIMITED_PLAN_LIMITS, 50)).toBeNull();
     // Null community count = treat as 1 (single-seat default).
     expect(effectiveMonthlyScans(basic, null)).toBe(10);
+
+    const plus = PLAN_LIMITS_BY_SLUG.community_monthly; // 20/community
+    expect(
+      effectiveMonthlyScans(
+        { ...plus, monthlyScansPackBonusPerMonth: 10 },
+        3,
+      ),
+    ).toBe((20 + 10) * 3);
   });
 
   it("TIER_PRICING yearly is at least a 15% discount vs 12 monthly bills", () => {
@@ -134,7 +146,12 @@ describe("plan-limits", () => {
     expect(PACK_PRICING.unitYearlyUsd).toBeLessThan(twelveMonths);
     const discount = 1 - PACK_PRICING.unitYearlyUsd / twelveMonths;
     expect(discount).toBeGreaterThanOrEqual(0.15);
-    expect(PACK_PRICING.newPagesPerUnit).toBeGreaterThan(0);
-    expect(PACK_PRICING.hardMaxPacksPerCommunity).toBeGreaterThan(0);
+    expect(PACK_PRICING.newPagesPerUnit).toBe(20);
+  });
+
+  it("RUNS_PACK_PRICING yearly is discounted vs 12× monthly", () => {
+    const twelve = RUNS_PACK_PRICING.unitMonthlyUsd * 12;
+    expect(RUNS_PACK_PRICING.unitYearlyUsd).toBeLessThan(twelve);
+    expect(RUNS_PACK_PRICING.monthlyScansPerUnit).toBe(10);
   });
 });

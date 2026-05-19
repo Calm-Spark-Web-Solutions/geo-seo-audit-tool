@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 /** Hover / screen-reader context: matches getAuditQuotaSnapshot counting rules. */
 const LIMITED_QUOTA_TITLE =
-  "Each visibility scan you start counts once for the month (any outcome: pending, running, complete, failed, or cancelled). The period is the UTC calendar month shown. Usage includes all organizations you belong to, not only the organization selected in the nav — limits are per signed-in account.";
+  "Manual scan quota counts audits that add at least one new tracked URL this month; pure rescans of URLs already on your roster are free. The period is UTC calendar month (or your Stripe trial window while trialing). Usage includes all organizations you belong to — limits are per signed-in account.";
 
 export function SidebarAccountSection({
   quota,

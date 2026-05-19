@@ -20,6 +20,8 @@ interface PdfActionsProps {
   hasSavedPdf: boolean;
   generatedAt: string | null;
   variant?: "card" | "row";
+  /** When false, PDF links and save are disabled (e.g. Stripe trial). */
+  pdfExportAllowed?: boolean;
 }
 
 export function PdfActions({
@@ -27,6 +29,7 @@ export function PdfActions({
   hasSavedPdf,
   generatedAt,
   variant = "card",
+  pdfExportAllowed = true,
 }: PdfActionsProps) {
   const [saveState, saveAction, savePending] = useActionState(
     savePdfToStorage,
@@ -96,42 +99,65 @@ export function PdfActions({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button asChild size="sm" variant="outline">
-          <a
-            href={`/api/visibility-scans/${auditId}/report.pdf`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Download className="h-4 w-4" aria-hidden />
-            Full report
-          </a>
-        </Button>
-
-        <Button asChild size="sm" variant="outline">
-          <a
-            href={`/api/visibility-scans/${auditId}/report.pdf?variant=seo`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Download className="h-4 w-4" aria-hidden />
-            SEO PDF
-          </a>
-        </Button>
-
-        <Button asChild size="sm" variant="outline">
-          <a
-            href={`/api/visibility-scans/${auditId}/report.pdf?variant=geo`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Download className="h-4 w-4" aria-hidden />
-            GEO PDF
-          </a>
-        </Button>
+        {!pdfExportAllowed ? (
+          <p className="max-w-md text-xs text-muted-foreground">
+            PDF download unlocks when your subscription is active (trial includes
+            capped scans only). Open Settings to finish checkout.
+          </p>
+        ) : null}
+        {pdfExportAllowed ? (
+          <>
+            <Button asChild size="sm" variant="outline">
+              <a
+                href={`/api/visibility-scans/${auditId}/report.pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="h-4 w-4" aria-hidden />
+                Full report
+              </a>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <a
+                href={`/api/visibility-scans/${auditId}/report.pdf?variant=seo`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="h-4 w-4" aria-hidden />
+                SEO PDF
+              </a>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <a
+                href={`/api/visibility-scans/${auditId}/report.pdf?variant=geo`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="h-4 w-4" aria-hidden />
+                GEO PDF
+              </a>
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button type="button" size="sm" variant="outline" disabled>
+              <Download className="h-4 w-4" aria-hidden />
+              Full report
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled>
+              <Download className="h-4 w-4" aria-hidden />
+              SEO PDF
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled>
+              <Download className="h-4 w-4" aria-hidden />
+              GEO PDF
+            </Button>
+          </>
+        )}
 
         <form action={saveAction}>
           <input type="hidden" name="audit_id" value={auditId} />
-          <Button type="submit" size="sm" disabled={savePending}>
+          <Button type="submit" size="sm" disabled={savePending || !pdfExportAllowed}>
             {savePending ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             ) : (
@@ -154,7 +180,7 @@ export function PdfActions({
               type="submit"
               size="sm"
               variant="ghost"
-              disabled={signedPending}
+              disabled={signedPending || !pdfExportAllowed}
             >
               {signedPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />

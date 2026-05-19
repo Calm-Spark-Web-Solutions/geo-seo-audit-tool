@@ -191,9 +191,18 @@ function imageOptimizationChecks(audits: Record<string, PsiAudit> | undefined): 
   return out;
 }
 
-function cwvChecks(audits: Record<string, PsiAudit> | undefined): AuditCheck[] {
+type PsiCwvStrategy = "mobile" | "desktop";
+
+function cwvChecks(
+  audits: Record<string, PsiAudit> | undefined,
+  strategy: PsiCwvStrategy,
+  opts?: { primary?: boolean },
+): AuditCheck[] {
   if (!audits) return [];
   const out: AuditCheck[] = [];
+  const primary = opts?.primary ?? strategy === "desktop";
+  const strategyLabel = strategy === "desktop" ? "desktop" : "mobile";
+  const keySuffix = primary ? "" : "_mobile";
 
   const lcp = audits["largest-contentful-paint"];
   if (lcp && typeof lcp.numericValue === "number" && Number.isFinite(lcp.numericValue)) {
@@ -202,10 +211,10 @@ function cwvChecks(audits: Record<string, PsiAudit> | undefined): AuditCheck[] {
     const score = ms <= 2500 ? 100 : ms <= 4000 ? 55 : 15;
     out.push(
       auditRow(
-        "psi_lcp",
-        "LCP (mobile)",
+        `psi_lcp${keySuffix}`,
+        `LCP (${strategyLabel})`,
         result,
-        `Largest Contentful Paint ≈ ${Math.round(ms)} ms (target ≤ 2.5 s).${lcp.displayValue ? ` Display: ${lcp.displayValue}.` : ""}`,
+        `Largest Contentful Paint (${strategyLabel}) ≈ ${Math.round(ms)} ms (target ≤ 2.5 s).${lcp.displayValue ? ` Display: ${lcp.displayValue}.` : ""}`,
         score,
         { category: "Core Web Vitals", pillar: "GEO" },
       ),
@@ -219,10 +228,10 @@ function cwvChecks(audits: Record<string, PsiAudit> | undefined): AuditCheck[] {
     const score = v <= 0.1 ? 100 : v <= 0.25 ? 50 : 10;
     out.push(
       auditRow(
-        "psi_cls",
-        "CLS (mobile)",
+        `psi_cls${keySuffix}`,
+        `CLS (${strategyLabel})`,
         result,
-        `Cumulative Layout Shift ≈ ${v.toFixed(3)} (target ≤ 0.1).`,
+        `Cumulative Layout Shift (${strategyLabel}) ≈ ${v.toFixed(3)} (target ≤ 0.1).`,
         score,
         { category: "Core Web Vitals", pillar: "GEO" },
       ),
@@ -236,10 +245,10 @@ function cwvChecks(audits: Record<string, PsiAudit> | undefined): AuditCheck[] {
     const score = ms <= 200 ? 100 : ms <= 500 ? 50 : 15;
     out.push(
       auditRow(
-        "psi_inp",
-        "INP (mobile)",
+        `psi_inp${keySuffix}`,
+        `INP (${strategyLabel})`,
         result,
-        `Interaction to Next Paint ≈ ${Math.round(ms)} ms (target ≤ 200 ms).${inp.displayValue ? ` Display: ${inp.displayValue}.` : ""}`,
+        `Interaction to Next Paint (${strategyLabel}) ≈ ${Math.round(ms)} ms (target ≤ 200 ms).${inp.displayValue ? ` Display: ${inp.displayValue}.` : ""}`,
         score,
         { category: "Core Web Vitals", pillar: "GEO" },
       ),
@@ -346,10 +355,9 @@ export async function runPsi(url: string): Promise<PsiBuckets> {
   const apiKey = process.env.PSI_API_KEY?.trim();
   if (!apiKey) return { seo: [], geo: [] };
 
-  const runDesktop = process.env.PSI_RUN_DESKTOP === "1" || process.env.PSI_DESKTOP === "true";
   const [json, deskJson] = await Promise.all([
     fetchPsiStrategy(url, apiKey, "mobile"),
-    runDesktop ? fetchPsiStrategy(url, apiKey, "desktop") : Promise.resolve(null),
+    fetchPsiStrategy(url, apiKey, "desktop"),
   ]);
   const cats = json?.lighthouseResult?.categories;
   const audits = json?.lighthouseResult?.audits;
@@ -414,28 +422,33 @@ export async function runPsi(url: string): Promise<PsiBuckets> {
 
   for (const c of imageOptimizationChecks(audits)) geo.push(c);
 
-  for (const c of cwvChecks(audits)) {
+  const deskAudits = deskJson?.lighthouseResult?.audits;
+  const deskCwv = cwvChecks(deskAudits, "desktop", { primary: true });
+  const hasDesktopCwv = deskCwv.some((c) =>
+    ["psi_lcp", "psi_cls", "psi_inp"].includes(c.key),
+  );
+  const mobileCwv = cwvChecks(audits, "mobile", { primary: !hasDesktopCwv });
+
+  for (const c of [...deskCwv, ...mobileCwv]) {
     if (c.key === "psi_mixed_content") seo.push(c);
     else geo.push(c);
   }
 
-  if (runDesktop) {
-    const dCats = deskJson?.lighthouseResult?.categories;
-    const perf = dCats?.["performance"];
-    if (perf && perf.score != null) {
-      const score = Math.round(perf.score * 100);
-      const result: CheckResult = score >= 90 ? "pass" : score >= 50 ? "warn" : "fail";
-      geo.push(
-        auditRow(
-          "psi_performance_desktop",
-          "Desktop Lighthouse performance",
-          result,
-          `Desktop Lighthouse performance category score ${score}/100 (guide: ≥90 for fast desktop UX).`,
-          score,
-          { category: "Site performance", pillar: "GEO" },
-        ),
-      );
-    }
+  const dCats = deskJson?.lighthouseResult?.categories;
+  const perf = dCats?.["performance"];
+  if (perf && perf.score != null) {
+    const score = Math.round(perf.score * 100);
+    const result: CheckResult = score >= 90 ? "pass" : score >= 50 ? "warn" : "fail";
+    geo.push(
+      auditRow(
+        "psi_performance_desktop",
+        "Desktop Lighthouse performance",
+        result,
+        `Desktop Lighthouse performance category score ${score}/100 (guide: ≥90 for fast desktop UX).`,
+        score,
+        { category: "Site performance", pillar: "GEO" },
+      ),
+    );
   }
 
   return { seo, geo };

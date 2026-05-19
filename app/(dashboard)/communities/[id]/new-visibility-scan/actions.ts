@@ -134,15 +134,28 @@ async function commitAuditAfterParsed(
   community: { company_id: string; website_url: string },
   parsed: ParsedSelection,
 ): Promise<StartAuditFormState> {
+  const classified = await classifyScanUrls(supabase, {
+    communityId: communityId,
+    urls: parsed.targetUrls,
+  });
+  const consumesManualQuota = classified.newUrls.length > 0;
+
+  if (consumesManualQuota) {
+    const quotaSnapshot = await getAuditQuotaSnapshot(supabase, user.id);
+    if (!quotaAllowsNewAudit(quotaSnapshot)) {
+      return {
+        ok: false,
+        error:
+          "Monthly scan limit reached for your plan. It resets next month, or upgrade in Billing for more scans.",
+      };
+    }
+  }
+
   // Page-roster billing gate. Rescans of URLs already in the roster are
   // always free; new URLs eat the monthly new-page allowance and the
   // total roster cap (see `community_page_roster` + `lib/billing/page-quota.ts`).
   const billingCtx = await loadBillingContext(supabase, user.id);
   if (!billingCtx.unlimited) {
-    const classified = await classifyScanUrls(supabase, {
-      communityId: communityId,
-      urls: parsed.targetUrls,
-    });
     const allowance = await loadNewPagesAllowance(supabase, {
       communityId: communityId,
       limits: billingCtx.limits,
@@ -206,6 +219,7 @@ async function commitAuditAfterParsed(
       max_pages: parsed.maxPages,
       shard_urls: parsed.shardUrls.length > 0 ? parsed.shardUrls : null,
       target_urls: parsed.targetUrls,
+      consumes_manual_quota: consumesManualQuota,
     })
     .select("id")
     .single();
@@ -275,15 +289,6 @@ export async function startAudit(
     };
   }
 
-  const quotaSnapshot = await getAuditQuotaSnapshot(supabase, user.id);
-  if (!quotaAllowsNewAudit(quotaSnapshot)) {
-    return {
-      ok: false,
-      error:
-        "Monthly scan limit reached for your plan. It resets next month, or upgrade in Billing for more scans.",
-    };
-  }
-
   const { data: community, error: cErr } = await supabase
     .from("communities")
     .select("id, company_id, website_url")
@@ -338,15 +343,6 @@ export async function rerunVisibilityScan(
     };
   }
 
-  const quotaSnapshot = await getAuditQuotaSnapshot(supabase, user.id);
-  if (!quotaAllowsNewAudit(quotaSnapshot)) {
-    return {
-      ok: false,
-      error:
-        "Monthly scan limit reached for your plan. It resets next month, or upgrade in Billing for more scans.",
-    };
-  }
-
   const { data: community, error: cErr } = await supabase
     .from("communities")
     .select("id, company_id, website_url")
@@ -394,6 +390,131 @@ export async function rerunVisibilityScan(
     maxPages: derived.urls.length,
     targetUrls: derived.urls,
     shardUrls: shardUrlsForInsert,
+  };
+
+  return commitAuditAfterParsed(supabase, user, communityId, community, parsed);
+}
+
+function parseFetchFailureUrls(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const url = (row as { url?: unknown }).url;
+    if (typeof url !== "string") continue;
+    const t = url.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+/** Rerun only URLs that failed HTML fetch on a prior partial scan. */
+export async function retryFailedPagesScan(
+  _prev: StartAuditFormState,
+  formData: FormData,
+): Promise<StartAuditFormState> {
+  const communityId = formData.get("community_id");
+  const sourceAuditId = formData.get("source_audit_id");
+  if (typeof communityId !== "string" || !communityId) {
+    return { ok: false, error: "Missing community." };
+  }
+  if (typeof sourceAuditId !== "string" || !sourceAuditId) {
+    return { ok: false, error: "Missing source scan." };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "You must be signed in." };
+
+  const stripeOn = isStripeConfigured();
+  const { data: subRow } = await supabase
+    .from("subscriptions")
+    .select("status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!userAllowedPaidProductFeatures(stripeOn, subRow)) {
+    return {
+      ok: false,
+      error:
+        "An active subscription is required to run visibility scans. Open Settings to choose a plan.",
+    };
+  }
+
+  const { data: community, error: cErr } = await supabase
+    .from("communities")
+    .select("id, company_id, website_url")
+    .eq("id", communityId)
+    .maybeSingle();
+
+  if (cErr || !community) {
+    return {
+      ok: false,
+      error: "Community not found or you don’t have access.",
+    };
+  }
+
+  const { data: prior, error: pErr } = await supabase
+    .from("audits")
+    .select("id, community_id, fetch_failures, shard_urls, max_pages, status")
+    .eq("id", sourceAuditId)
+    .maybeSingle();
+
+  if (pErr || !prior) {
+    return { ok: false, error: "That visibility scan was not found." };
+  }
+  if (prior.community_id !== communityId) {
+    return {
+      ok: false,
+      error: "That scan does not belong to this community.",
+    };
+  }
+  if (prior.status !== "complete") {
+    return {
+      ok: false,
+      error: "Retry failed pages is only available on completed scans.",
+    };
+  }
+
+  const failedUrls = parseFetchFailureUrls(prior.fetch_failures);
+  if (failedUrls.length === 0) {
+    return {
+      ok: false,
+      error: "This scan has no recorded fetch failures to retry.",
+    };
+  }
+
+  const normalized = parseSameOriginUrlList(
+    failedUrls,
+    community.website_url,
+    "A failed URL from the prior scan is invalid.",
+    "Failed URLs must be http(s).",
+    "Failed URLs must live on the community’s domain.",
+  );
+  if ("error" in normalized) {
+    return { ok: false, error: normalized.error };
+  }
+
+  const cap =
+    typeof prior.max_pages === "number" && prior.max_pages > 0
+      ? Math.min(prior.max_pages, MAX_PAGES_CEILING)
+      : normalized.length;
+
+  const targetUrls = normalized.slice(0, cap);
+  const shardMeta = Array.isArray(prior.shard_urls)
+    ? prior.shard_urls
+        .filter((u): u is string => typeof u === "string")
+        .slice(0, MAX_SHARD_URLS)
+    : [];
+
+  const parsed: ParsedSelection = {
+    maxPages: targetUrls.length,
+    targetUrls,
+    shardUrls: shardMeta,
   };
 
   return commitAuditAfterParsed(supabase, user, communityId, community, parsed);
