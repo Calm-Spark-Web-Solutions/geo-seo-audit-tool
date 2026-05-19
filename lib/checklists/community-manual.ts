@@ -1,3 +1,5 @@
+import type { CommunityManualResults } from "@/types";
+
 /**
  * Expert human checklist rows (stored per community in `manual_check_results`).
  * Automated crawl/score output lives in deterministic / PSI / CrUX layers.
@@ -158,7 +160,7 @@ export const COMMUNITY_MANUAL_GEO_ITEMS: ManualTemplateItem[] =
 
 /** Count GEO manual rows that have been reviewed (any status other than unreviewed). */
 export function geoManualChecklistProgress(
-  results: Record<string, { status?: string }> | null | undefined,
+  results: CommunityManualResults | null | undefined,
 ): { reviewed: number; total: number } {
   const total = COMMUNITY_MANUAL_GEO_KEYS.length;
   let reviewed = 0;
