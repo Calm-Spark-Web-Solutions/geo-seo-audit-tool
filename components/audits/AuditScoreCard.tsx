@@ -2,6 +2,12 @@ import { AlertTriangle, Calendar } from "lucide-react";
 
 import { CancelAuditButton } from "@/components/audits/CancelAuditButton";
 import { RetryRunnerButton } from "@/components/audits/RetryRunnerButton";
+import {
+  crawlCoverageLabel,
+  isLowConfidenceCrawl,
+  isPartialCrawl,
+  lowConfidenceScoreNote,
+} from "@/lib/audit/partial-crawl";
 import { ProgressBar } from "@/components/audits/ProgressBar";
 import { StatusBadge } from "@/components/audits/StatusBadge";
 import { AUDIT_RUNNING_EXPECTATION } from "@/lib/audit/reader-copy";
@@ -40,6 +46,10 @@ export function AuditScoreCard({
   const date = new Date(audit.created_at).toLocaleString();
   const isRunning = audit.status === "pending" || audit.status === "running";
   const isFailed = audit.status === "failed";
+  const isComplete = audit.status === "complete";
+  const partialCrawl = isComplete && isPartialCrawl(audit);
+  const lowConfidence = isComplete && isLowConfidenceCrawl(audit);
+  const pagesLabel = crawlCoverageLabel(audit);
   const progressTotal = audit.progress_total ?? 0;
   const indeterminateProgress = isRunning && progressTotal === 0;
   const retryLikely =
@@ -114,6 +124,11 @@ export function AuditScoreCard({
             </div>
           </div>
         ) : null}
+        {lowConfidence && !partialCrawl ? (
+          <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-200">
+            {lowConfidenceScoreNote(audit)}
+          </p>
+        ) : null}
         {isRunning ? (
           <div className="flex flex-col gap-3">
             <ProgressBar
@@ -155,11 +170,17 @@ export function AuditScoreCard({
             </p>
           </div>
         ) : null}
-        <div className="grid gap-4 sm:grid-cols-4">
+        <div
+          className={
+            lowConfidence
+              ? "grid gap-4 opacity-90 sm:grid-cols-4"
+              : "grid gap-4 sm:grid-cols-4"
+          }
+        >
           <ScoreBlock label="Overall" value={audit.score} emphasized />
           <ScoreBlock label="SEO" value={audit.seo_score} />
           <ScoreBlock label="GEO" value={audit.geo_score} />
-          <ScoreBlock label="Pages crawled" value={audit.pages_crawled} />
+          <ScoreBlock label="Pages crawled" text={pagesLabel} />
         </div>
       </CardContent>
     </Card>
@@ -169,12 +190,15 @@ export function AuditScoreCard({
 function ScoreBlock({
   label,
   value,
+  text,
   emphasized,
 }: {
   label: string;
-  value: number | null;
+  value?: number | null;
+  text?: string;
   emphasized?: boolean;
 }) {
+  const display = text ?? (value != null ? String(value) : "—");
   return (
     <div
       className={
@@ -186,8 +210,16 @@ function ScoreBlock({
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <p className={emphasized ? "text-2xl font-semibold" : "text-lg font-medium"}>
-        {value ?? "—"}
+      <p
+        className={
+          text
+            ? "text-base font-medium"
+            : emphasized
+              ? "text-2xl font-semibold"
+              : "text-lg font-medium"
+        }
+      >
+        {display}
       </p>
     </div>
   );

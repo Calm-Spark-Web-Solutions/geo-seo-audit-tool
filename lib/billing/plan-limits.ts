@@ -52,6 +52,11 @@ export interface PlanLimits {
    * adds this to the base cap.
    */
   newPagesPackBonusPerMonth: number | null;
+  /**
+   * Per-community bonus manual audit-starts per UTC month from Run Packs
+   * (`runs_pack_{monthly,yearly}`). Same merge rules as page-pack bonus.
+   */
+  monthlyScansPackBonusPerMonth: number | null;
 }
 
 /**
@@ -64,6 +69,7 @@ export const UNLIMITED_PLAN_LIMITS: PlanLimits = {
   pagesPerCommunity: null,
   newPagesPerCommunityMonth: null,
   newPagesPackBonusPerMonth: null,
+  monthlyScansPackBonusPerMonth: null,
 };
 
 /**
@@ -77,6 +83,20 @@ export const FREE_PLAN_LIMITS: PlanLimits = {
   pagesPerCommunity: 25,
   newPagesPerCommunityMonth: 10,
   newPagesPackBonusPerMonth: 0,
+  monthlyScansPackBonusPerMonth: 0,
+};
+
+/**
+ * Stripe `trialing` — no card required during Checkout trial; caps enforced
+ * in-app until the subscription becomes `active`.
+ */
+export const TRIAL_PLAN_LIMITS: PlanLimits = {
+  monthlyScans: 3,
+  communities: 1,
+  pagesPerCommunity: 10,
+  newPagesPerCommunityMonth: 10,
+  newPagesPackBonusPerMonth: 0,
+  monthlyScansPackBonusPerMonth: 0,
 };
 
 /**
@@ -93,6 +113,7 @@ export const PLAN_LIMITS_BY_SLUG: Record<CheckoutTierPriceKey, PlanLimits> = {
     pagesPerCommunity: 50,
     newPagesPerCommunityMonth: 20,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
   residence_yearly: {
     monthlyScans: 10,
@@ -100,34 +121,39 @@ export const PLAN_LIMITS_BY_SLUG: Record<CheckoutTierPriceKey, PlanLimits> = {
     pagesPerCommunity: 50,
     newPagesPerCommunityMonth: 20,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
   community_monthly: {
-    monthlyScans: 30,
+    monthlyScans: 20,
     communities: 1,
     pagesPerCommunity: 150,
     newPagesPerCommunityMonth: 60,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
   community_yearly: {
-    monthlyScans: 30,
+    monthlyScans: 20,
     communities: 1,
     pagesPerCommunity: 150,
     newPagesPerCommunityMonth: 60,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
   portfolio_monthly: {
-    monthlyScans: 75,
+    monthlyScans: 40,
     communities: 1,
     pagesPerCommunity: 500,
     newPagesPerCommunityMonth: 200,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
   portfolio_yearly: {
-    monthlyScans: 75,
+    monthlyScans: 40,
     communities: 1,
     pagesPerCommunity: 500,
     newPagesPerCommunityMonth: 200,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
   partner_monthly: {
     // Partner / Enterprise: invoiced, generous defaults; expected to be
@@ -137,6 +163,7 @@ export const PLAN_LIMITS_BY_SLUG: Record<CheckoutTierPriceKey, PlanLimits> = {
     pagesPerCommunity: 1000,
     newPagesPerCommunityMonth: 500,
     newPagesPackBonusPerMonth: 0,
+    monthlyScansPackBonusPerMonth: 0,
   },
 };
 
@@ -147,11 +174,35 @@ export const PLAN_LIMITS_BY_SLUG: Record<CheckoutTierPriceKey, PlanLimits> = {
  */
 export const PACK_PRICING = {
   /** New-pages-per-month per community granted by one pack unit. */
-  newPagesPerUnit: 25,
+  newPagesPerUnit: 20,
   unitMonthlyUsd: 5,
+  /** ~17% off paying monthly × 12 (aligned with tier annual discount). */
   unitYearlyUsd: 50,
-  hardMaxPacksPerCommunity: 20,
 } as const;
+
+/**
+ * Run Pack add-on: +10 manual audit-starts per community per month per unit.
+ * Billed per (community × packs) like page packs.
+ */
+export const RUNS_PACK_PRICING = {
+  monthlyScansPerUnit: 10,
+  unitMonthlyUsd: 10,
+  unitYearlyUsd: 100,
+} as const;
+
+/**
+ * Max page/run packs **per community** by tier (`null` = unlimited).
+ * Basic: 3 each; Plus: 5 each; Pro & Partner: unlimited.
+ */
+export function maxAddonPacksPerCommunity(
+  tierPriceKey: CheckoutTierPriceKey,
+): number | null {
+  if (tierPriceKey.startsWith("portfolio")) return null;
+  if (tierPriceKey.startsWith("partner")) return null;
+  if (tierPriceKey.startsWith("community")) return 5;
+  if (tierPriceKey.startsWith("residence")) return 3;
+  return 3;
+}
 
 /**
  * Per-community monthly USD price for each tier. Displayed by the plan
@@ -175,25 +226,56 @@ export const TIER_PRICING: Record<
     monthlyUsd: 29,
     yearlyUsd: 290,
     label: "Basic",
-    tagline: "Audits for a small set of pages per community",
+    tagline: "Perfect for single communities getting started with SEO & GEO",
   },
   community: {
     monthlyUsd: 59,
     yearlyUsd: 590,
     label: "Plus",
-    tagline: "More tracked pages and bigger monthly add-on budget",
+    tagline: "For regional operators managing several communities",
   },
   portfolio: {
     monthlyUsd: 99,
     yearlyUsd: 990,
     label: "Pro",
-    tagline: "Highest page roster and new-page allowance per community",
+    tagline: "For large operators and content-heavy multi-brand communities",
   },
 };
 
 export const COMMUNITY_QUANTITY_HARD_MIN = 1;
 /** Above this, send users to the Partner program for invoiced pricing. */
 export const COMMUNITY_QUANTITY_HARD_MAX = 100;
+
+/**
+ * Volume discount on list subtotal at 5 / 10 / 20 / 50+ communities (Stripe
+ * tiered prices should match these breakpoints). Returns fraction off (0–0.2).
+ */
+export function volumeDiscountFraction(communityCount: number): number {
+  const n = Math.floor(communityCount);
+  if (n >= 50) return 0.2;
+  if (n >= 20) return 0.15;
+  if (n >= 10) return 0.1;
+  if (n >= 5) return 0.05;
+  return 0;
+}
+
+/** Whole-dollar list subtotal before volume discount (tier unit × communities). */
+export function monthlyListSubtotal(
+  unitMonthlyUsd: number,
+  communityCount: number,
+): number {
+  return unitMonthlyUsd * Math.max(COMMUNITY_QUANTITY_HARD_MIN, communityCount);
+}
+
+/** Estimated post-volume-discount monthly tier subtotal (integer USD). */
+export function monthlyVolumeDiscountedSubtotal(
+  unitMonthlyUsd: number,
+  communityCount: number,
+): number {
+  const list = monthlyListSubtotal(unitMonthlyUsd, communityCount);
+  const frac = volumeDiscountFraction(communityCount);
+  return Math.round(list * (1 - frac));
+}
 
 /**
  * Total audit-starts budget for the org in a UTC month, given the
@@ -205,9 +287,14 @@ export function effectiveMonthlyScans(
   communityCount: number | null,
 ): number | null {
   if (limits.monthlyScans === null) return null;
-  if (communityCount === null) return limits.monthlyScans;
+  const packBonus =
+    limits.monthlyScansPackBonusPerMonth === null
+      ? 0
+      : Math.max(0, limits.monthlyScansPackBonusPerMonth);
+  const perCommunity = Math.max(0, limits.monthlyScans) + packBonus;
+  if (communityCount === null) return perCommunity;
   const safeCount = Math.max(1, Math.floor(communityCount));
-  return limits.monthlyScans * safeCount;
+  return perCommunity * safeCount;
 }
 
 /**
@@ -244,6 +331,7 @@ export function applyPlanLimitsOverride(
     "pagesPerCommunity",
     "newPagesPerCommunityMonth",
     "newPagesPackBonusPerMonth",
+    "monthlyScansPackBonusPerMonth",
   ];
   for (const k of keys) {
     if (!(k in o)) continue;
@@ -272,9 +360,21 @@ export function resolvePlanLimits(
   return applyPlanLimitsOverride(base, planLimits ?? null);
 }
 
+/** Trial window bounds stored in `subscriptions.plan_limits` by the webhook. */
+export function trialWindowFromPlanLimits(
+  planLimits: unknown | null | undefined,
+): { start: string; end: string } | null {
+  if (!planLimits || typeof planLimits !== "object") return null;
+  const o = planLimits as Record<string, unknown>;
+  const s = o.billing_trial_start;
+  const e = o.billing_trial_end;
+  if (typeof s === "string" && typeof e === "string") return { start: s, end: e };
+  return null;
+}
+
 /**
  * Format limits as a single short sentence used on the plan builder
- * card copy ("50 pages tracked · 20 new pages/mo · 10 audit starts").
+ * card copy (tracked pages · manual runs · free auto rescan line).
  * Community count is dropped because the builder displays it as a separate
  * input, not a per-card cap.
  */
@@ -286,14 +386,10 @@ export function formatPlanLimitsShort(limits: PlanLimits): string {
       : `${limits.pagesPerCommunity.toLocaleString()} pages tracked`,
   );
   parts.push(
-    limits.newPagesPerCommunityMonth === null
-      ? "unlimited new pages/mo"
-      : `${limits.newPagesPerCommunityMonth.toLocaleString()} new pages/mo`,
-  );
-  parts.push(
     limits.monthlyScans === null
-      ? "unlimited audit starts"
-      : `${limits.monthlyScans.toLocaleString()} audit starts/mo`,
+      ? "Unlimited manual audit runs/mo"
+      : `${limits.monthlyScans.toLocaleString()} manual audit runs/mo`,
   );
+  parts.push("1 free auto rescan/mo");
   return parts.join(" · ");
 }

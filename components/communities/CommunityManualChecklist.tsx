@@ -5,7 +5,10 @@ import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { saveCommunityManualChecklist } from "@/app/(dashboard)/communities/actions";
-import { COMMUNITY_MANUAL_ITEMS } from "@/lib/checklists/community-manual";
+import {
+  COMMUNITY_MANUAL_ITEMS,
+  geoManualChecklistProgress,
+} from "@/lib/checklists/community-manual";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -41,15 +44,23 @@ function buildInitialState(
 export function CommunityManualChecklist({
   communityId,
   initialResults,
+  cardDescription,
   variant = "default",
 }: {
   communityId: string;
   initialResults: CommunityManualResults | null;
+  /** Passed from a Server Component so SSR and hydration share the same string. */
+  cardDescription: string;
   /** Collapsed `<details>` by default — use on audit report pages only. */
   variant?: "default" | "collapsible";
 }) {
   const [state, setState] = useState(() => buildInitialState(initialResults));
   const [pending, startTransition] = useTransition();
+
+  const geoProgress = useMemo(
+    () => geoManualChecklistProgress(initialResults),
+    [initialResults],
+  );
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof COMMUNITY_MANUAL_ITEMS>();
@@ -96,11 +107,7 @@ export function CommunityManualChecklist({
       <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle className="text-base">Expert checklist (human sign-off)</CardTitle>
-          <CardDescription>
-            Human-reviewed items (Search Console, directories, backlinks, editorial quality). These sign-offs are stored per community and shown on PDFs
-            — they are never used to calculate SEO/GEO/total scores (those come only from automated checks on each run). Stored per community; same answers
-            repeat on audit reports until you change them here.
-          </CardDescription>
+          <CardDescription>{cardDescription}</CardDescription>
         </div>
         <Button type="button" onClick={onSave} disabled={pending} size="sm">
           {pending ? "Saving…" : "Save checklist"}
@@ -162,7 +169,11 @@ export function CommunityManualChecklist({
 
   if (variant === "collapsible") {
     return (
-      <section id="expert-checklist" className="scroll-mt-6" aria-label="Expert checklist">
+      <section
+        id="expert-checklist"
+        className="mt-6 scroll-mt-6"
+        aria-label="Expert checklist"
+      >
         <details className="group overflow-hidden rounded-lg border border-border bg-card">
           <summary className="flex cursor-pointer list-none items-start gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/35 [&::-webkit-details-marker]:hidden">
             <ChevronDown
@@ -174,6 +185,9 @@ export function CommunityManualChecklist({
                 Expert checklist (human sign-off)
               </span>
               <span className="text-xs font-normal leading-snug text-muted-foreground">
+                {geoProgress.reviewed < geoProgress.total
+                  ? `${geoProgress.reviewed} of ${geoProgress.total} GEO items reviewed · `
+                  : null}
                 Expand to edit · optional · does not affect automated scores
               </span>
             </span>

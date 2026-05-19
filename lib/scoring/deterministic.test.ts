@@ -37,6 +37,8 @@ const GOOD_HTML = `<!doctype html>
     <meta property="og:description" content="Compassionate assisted living and memory care.">
     <meta property="og:image" content="https://example.com/og.jpg">
     <meta name="twitter:card" content="summary_large_image">
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-TEST123456"></script>
+    <script>gtag('config', 'G-TEST123456');</script>
     <script type="application/ld+json">{
       "@context":"https://schema.org",
       "@type":"LocalBusiness",
@@ -213,6 +215,119 @@ describe("runDeterministicChecks: evidence shape", () => {
     const imgs = (c?.evidence?.items ?? []).filter((i) => i.type === "image");
     expect(imgs.length).toBe(2);
     expect(c?.evidence?.totalCount).toBe(2);
+  });
+});
+
+const META_DESC =
+  "Test page meta description for deterministic checks with enough length to satisfy minimum requirements for the meta description field in the scorer.";
+
+describe("runDeterministicChecks: internal links", () => {
+  it("scores in-content links only and separates nav/footer samples", () => {
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Internal Links Scope Test Page Title Long</title>
+    <meta name="description" content="${META_DESC}">
+  </head>
+  <body>
+    <header>
+      <nav>
+        <a href="/nav-home">Home</a>
+        <a href="/nav-about">About</a>
+        <a href="/nav-contact">Contact</a>
+      </nav>
+    </header>
+    <main>
+      <h1>Services</h1>
+      <p><a href="/in-body-one">First in-body</a> and <a href="/in-body-two">second in-body</a>.</p>
+    </main>
+    <footer>
+      <a href="/footer-privacy">Privacy</a>
+    </footer>
+  </body>
+</html>`;
+    const result = runDeterministicChecks(html, PAGE_URL);
+    const c = findCheck(result, "internal_links");
+    expect(c?.result).toBe("warn");
+    expect(c?.explanation).toContain("2 in-content");
+    expect(c?.evidence?.totalCount).toBe(2);
+    const urls = (c?.evidence?.items ?? [])
+      .filter((i) => i.type === "link")
+      .map((i) => (i.type === "link" ? i.url : ""));
+    expect(urls.some((u) => u.includes("in-body"))).toBe(true);
+    expect(urls.some((u) => u.includes("nav-home"))).toBe(false);
+    expect(c?.evidence?.chromeTotalCount).toBeGreaterThan(0);
+    const chromeUrls = (c?.evidence?.chromeItems ?? [])
+      .filter((i) => i.type === "link")
+      .map((i) => (i.type === "link" ? i.url : ""));
+    expect(chromeUrls.some((u) => u.includes("nav-home"))).toBe(true);
+  });
+});
+
+describe("runDeterministicChecks: primary content scope", () => {
+  it("faq_heading fails when only the footer has a question heading", () => {
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Footer FAQ Test Page Title Long Enough Here</title>
+    <meta name="description" content="${META_DESC}">
+  </head>
+  <body>
+    <main>
+      <h1>Welcome</h1>
+      <h2>Our services</h2>
+      <p>We offer assisted living and memory care on campus.</p>
+    </main>
+    <footer>
+      <h2>How Are Life Plan Communities and 55+ Communities Different?</h2>
+      <p>Retirement is a time to relax and enjoy your golden years.</p>
+    </footer>
+  </body>
+</html>`;
+    const result = runDeterministicChecks(html, PAGE_URL);
+    expectResult(result, "faq_heading", "fail");
+  });
+
+  it("faq_heading passes when a question heading is in main content", () => {
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Main FAQ Test Page Title Long Enough Here</title>
+    <meta name="description" content="${META_DESC}">
+  </head>
+  <body>
+    <main>
+      <h1>Welcome</h1>
+      <h2>What services do you offer?</h2>
+      <p>Assisted living and memory care.</p>
+    </main>
+    <footer><h2>Site map</h2></footer>
+  </body>
+</html>`;
+    const result = runDeterministicChecks(html, PAGE_URL);
+    expectResult(result, "faq_heading", "pass");
+  });
+
+  it("word_count is not inflated by long footer copy", () => {
+    const footerPadding = "lorem ipsum dolor sit amet ".repeat(80);
+    const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <title>Word Count Scope Test Page Title Long Enough</title>
+    <meta name="description" content="${META_DESC}">
+  </head>
+  <body>
+    <main>
+      <h1>Thin page</h1>
+      <p>Short primary content only.</p>
+    </main>
+    <footer><p>${footerPadding}</p></footer>
+  </body>
+</html>`;
+    const result = runDeterministicChecks(html, PAGE_URL);
+    const wc = findCheck(result, "word_count");
+    expect(wc?.result).not.toBe("pass");
+    expect(wc?.explanation).toContain("primary content");
   });
 });
 

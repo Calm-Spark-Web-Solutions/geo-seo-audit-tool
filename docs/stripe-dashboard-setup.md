@@ -4,53 +4,70 @@ Do this in the [Stripe Dashboard](https://dashboard.stripe.com/test/) before pro
 
 ## 1. Products
 
-Create four products (names are for your reference; prices carry the real amounts):
+Create **six** recurring products (names are for your reference; prices carry the real amounts):
 
-| Product              | Public marketing name |
-|----------------------|------------------------|
-| RankLume — Residence | **Residence**          |
-| RankLume — Community | **Community**          |
-| RankLume — Portfolio | **Portfolio**          |
-| RankLume — Partner   | **Partner program** (invite-only in the app) |
+| Product (internal)        | Public name |
+|---------------------------|-------------|
+| RankLume — Basic          | **Basic** (per community) |
+| RankLume — Plus           | **Plus** (per community) |
+| RankLume — Pro            | **Pro** (per community) |
+| RankLume — Partner        | **Partner program** (invite-only in the app) |
+| RankLume — Page Pack      | **Page Pack** add-on |
+| RankLume — Run Pack       | **Run Pack** add-on |
 
-## 2. Recurring prices
+## 2. Tier recurring prices (per community)
 
-Attach **two** recurring prices to each of the three public products:
+Attach **two** recurring prices to each of **Basic**, **Plus**, and **Pro**:
 
-| Tier       | Monthly | Yearly |
-|------------|---------|--------|
-| Residence  | $79     | $790   |
-| Community  | $199    | $1,990 |
-| Portfolio  | $449    | $4,490 |
+| Tier  | Monthly list (per community) | Yearly list (per community, ~17% off vs 12× monthly) |
+|-------|------------------------------|--------------------------------------------------------|
+| Basic | $29                          | $290                                                   |
+| Plus  | $59                          | $590                                                   |
+| Pro   | $99                          | $990                                                   |
 
-Attach **one** recurring price to Partner (e.g. **$20/month**). Yearly optional.
+**Volume discount (5–20% off the tier line):** configure each tier’s monthly and yearly recurring price as **volume-tiered** (or graduated) billing in Stripe so that at **5, 10, 20, and 50+** communities the effective per-seat rate matches your policy (5%, 10%, 15%, 20% off list). The app’s plan builder uses the same breakpoints for **display estimates** (`volumeDiscountFraction` / `monthlyVolumeDiscountedSubtotal` in `lib/billing/plan-limits.ts`); Stripe remains the source of truth for what is charged.
 
-Copy each Price ID (`price_...`) — you will paste them into environment variables (see `.env.example`).
+Attach **one** recurring price to Partner (e.g. placeholder **$20/month**). Yearly optional.
 
-## 3. Customer portal
+Copy each Price ID (`price_...`) into environment variables (see `.env.example`).
+
+## 3. Add-on recurring prices
+
+**Page Pack** — recurring, **$5/month** per pack per community (yearly: **$50/year** per pack per community, ~17% off 12× monthly). One unit = **+20** new pages per community per month (see `PACK_PRICING` in `lib/billing/plan-limits.ts`).
+
+**Run Pack** — recurring, **$10/month** per pack per community (yearly: **$100/year** per pack per community). One unit = **+10** manual audit-starts per community per month (see `RUNS_PACK_PRICING`).
+
+Checkout sends line item quantity = `packsPerCommunity × communityCount` for each add-on so Stripe bills correctly for every seat.
+
+## 4. Checkout trial (14 days, no card required)
+
+The app creates Checkout with `subscription_data.trial_period_days: 14` and `payment_method_collection: "if_required"`. In Stripe **Settings → Billing → Subscriptions and emails**, ensure trials can start **without** requiring a payment method if that matches your product policy.
+
+During **trialing**, the app enforces **trial caps** (`TRIAL_PLAN_LIMITS`); PDF download stays locked until **active**. The webhook stores `billing_trial_start` / `billing_trial_end` on `subscriptions.plan_limits` for quota windows.
+
+## 5. Customer portal
 
 **Settings → Billing → Customer portal**
 
 - Let customers cancel subscriptions.
-- Let customers switch plans if you enable plan switching (optional).
-- Set the **privacy policy** and **terms** links if required.
+- Optionally allow plan / quantity changes (maps to tier + community count + add-ons).
 
 Set **Default redirect** / business URL to your production domain when you go live.
 
-## 4. Webhooks
+## 6. Webhooks
 
 ### Production / staging
 
 **Developers → Webhooks → Add endpoint**
 
 - URL: `https://<your-domain>/api/stripe/webhook`
-- Events to send:
+- Events:
   - `checkout.session.completed`
   - `customer.subscription.created`
   - `customer.subscription.updated`
   - `customer.subscription.deleted`
 
-Reveal the **Signing secret** (`whsec_...`) → `STRIPE_WEBHOOK_SECRET`.
+Signing secret → `STRIPE_WEBHOOK_SECRET`.
 
 ### Local development
 
@@ -62,15 +79,24 @@ stripe listen --forward-to localhost:3000/api/stripe/webhook
 
 Use the CLI-printed webhook signing secret as `STRIPE_WEBHOOK_SECRET` in `.env.local`.
 
-## 5. API keys
+## 7. API keys
 
 **Developers → API keys**
 
-- **Publishable** → optional `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (only needed for Stripe.js / Elements).
+- **Publishable** → `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (if using Stripe.js).
 - **Secret** → `STRIPE_SECRET_KEY` (server-only; never commit).
 
-Repeat for **Live mode** when you launch, with live Price IDs and a live webhook endpoint.
+Repeat for **Live mode** with live Price IDs and a live webhook endpoint.
 
-## 6. Partner program
+## 8. Partner program
 
-Do **not** expose the Partner price on a public marketing site unless you intend to. In this app, Partner appears as a **by-invitation** callout; checkout still uses the same Stripe Price ID from `STRIPE_PRICE_PARTNER_MONTHLY`, configured only in your environment.
+Do **not** expose the Partner price publicly unless intended. In the app, Partner is a **by-invitation** callout; checkout uses `STRIPE_PRICE_PARTNER_MONTHLY` from the environment.
+
+## 9. Env var checklist
+
+See `.env.example` for:
+
+- `STRIPE_PRICE_RESIDENCE_*`, `STRIPE_PRICE_COMMUNITY_*`, `STRIPE_PRICE_PORTFOLIO_*` (tier monthly/yearly)
+- `STRIPE_PRICE_PAGES_PACK_MONTHLY` / `YEARLY`
+- `STRIPE_PRICE_RUNS_PACK_MONTHLY` / `YEARLY`
+- `STRIPE_PRICE_PARTNER_MONTHLY`

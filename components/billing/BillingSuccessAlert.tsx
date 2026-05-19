@@ -2,7 +2,7 @@
 
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   /**
@@ -18,37 +18,25 @@ interface Props {
 const REFRESH_INTERVAL_MS = 3000;
 const MAX_REFRESH_ATTEMPTS = 5;
 
-type Phase = "waiting" | "success" | "stale";
-
 export function BillingSuccessAlert({ stripeSubId }: Props) {
   const router = useRouter();
-  const initialRef = useRef<string | null>(stripeSubId);
+  const [baselineSubId] = useState(() => stripeSubId);
   const [attempts, setAttempts] = useState(0);
-  const [phase, setPhase] = useState<Phase>(() =>
-    stripeSubId !== null && stripeSubId !== "" ? "waiting" : "waiting",
-  );
+
+  const succeeded = stripeSubId !== baselineSubId;
+  const stale = !succeeded && attempts >= MAX_REFRESH_ATTEMPTS;
 
   useEffect(() => {
-    if (phase !== "waiting") return;
-
-    if (stripeSubId !== initialRef.current) {
-      setPhase("success");
-      return;
-    }
-
-    if (attempts >= MAX_REFRESH_ATTEMPTS) {
-      setPhase("stale");
-      return;
-    }
+    if (succeeded || stale) return;
 
     const t = setTimeout(() => {
       setAttempts((a) => a + 1);
       router.refresh();
     }, REFRESH_INTERVAL_MS);
     return () => clearTimeout(t);
-  }, [stripeSubId, phase, attempts, router]);
+  }, [succeeded, stale, attempts, router]);
 
-  if (phase === "success") {
+  if (succeeded) {
     return (
       <Banner tone="ok" Icon={CheckCircle2} title="Subscription updated">
         Your plan, community count, and Page Pack allowance are now in sync
@@ -57,7 +45,7 @@ export function BillingSuccessAlert({ stripeSubId }: Props) {
     );
   }
 
-  if (phase === "stale") {
+  if (stale) {
     return (
       <Banner
         tone="warn"

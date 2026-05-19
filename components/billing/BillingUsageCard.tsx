@@ -50,8 +50,8 @@ export function BillingUsageCard({ snapshot }: { snapshot: BillingUsageSnapshot 
 
   const auditsLine =
     audits.kind === "unlimited"
-      ? "Unlimited audit starts this month"
-      : `${audits.used.toLocaleString()} / ${audits.limit.toLocaleString()} audit starts (${audits.periodLabel})`;
+      ? "Unlimited manual audit runs this month"
+      : `${audits.used.toLocaleString()} / ${audits.limit.toLocaleString()} manual audit runs (${audits.periodLabel})`;
 
   const communityLine =
     community.kind === "unlimited"
@@ -72,7 +72,7 @@ export function BillingUsageCard({ snapshot }: { snapshot: BillingUsageSnapshot 
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-md border border-border p-3">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Audit starts
+              Manual audit runs
             </p>
             <p className="mt-1">{auditsLine}</p>
           </div>

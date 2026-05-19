@@ -28,10 +28,10 @@ export function AuditPageRollupExclusion({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">Audit averages</CardTitle>
+        <CardTitle className="text-base">Scan averages</CardTitle>
         <CardDescription>
-          Password-protected or gated URLs are detected when possible and omitted from community audit averages by default. You can also exclude this URL
-          manually. Findings below are unchanged—only rollup scores on the community audit list are affected.
+          Password-protected or gated URLs are detected when possible and omitted from scan averages by default. You can also exclude this URL
+          manually. Per-page checks below are unchanged—only the headline scores on this scan and community history are affected.
         </CardDescription>
       </CardHeader>
       <CardContent>

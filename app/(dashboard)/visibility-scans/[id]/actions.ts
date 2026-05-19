@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 
+import { userAllowedPdfExport } from "@/lib/billing/subscription-access";
 import { loadAuditPdfPayload, renderAuditPdfBuffer } from "@/lib/pdf/render";
 import { createClient } from "@/lib/supabase/server";
+import { isStripeConfigured } from "@/lib/stripe/server";
 
 const BUCKET = "audit-reports";
 const SIGNED_URL_EXPIRY_SECONDS = 60 * 5;
@@ -40,6 +42,20 @@ export async function savePdfToStorage(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You must be signed in." };
+
+  const stripeOn = isStripeConfigured();
+  const { data: subRow } = await supabase
+    .from("subscriptions")
+    .select("status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!userAllowedPdfExport(stripeOn, subRow)) {
+    return {
+      ok: false,
+      error:
+        "PDF save is available after your subscription becomes active (not during trial).",
+    };
+  }
 
   const payload = await loadAuditPdfPayload(supabase, auditId);
   if (!payload) {
@@ -91,7 +107,6 @@ export async function savePdfToStorage(
   }
 
   revalidatePath(`/visibility-scans/${auditId}`);
-  revalidatePath(`/visibility-scans/${auditId}/export`);
 
   return {
     ok: true,
@@ -114,6 +129,20 @@ export async function getSignedReportUrl(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You must be signed in." };
+
+  const stripeOn = isStripeConfigured();
+  const { data: subRow } = await supabase
+    .from("subscriptions")
+    .select("status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!userAllowedPdfExport(stripeOn, subRow)) {
+    return {
+      ok: false,
+      error:
+        "Saved PDF links are available after your subscription becomes active.",
+    };
+  }
 
   const { data: audit, error: auditErr } = await supabase
     .from("audits")

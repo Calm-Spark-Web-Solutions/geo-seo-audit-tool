@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CommunityForm } from "@/components/communities/CommunityForm";
+import { CommunityGooglePropertiesForm } from "@/components/integrations/CommunityGooglePropertiesForm";
 import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,22 @@ export default async function EditCommunityPage({
     .select("id, company_id, name, website_url, facility_type, created_at")
     .eq("id", id)
     .maybeSingle();
+
+  const companyId = community?.company_id as string | undefined;
+  const [{ data: googleProps }, { data: googleConn }] = companyId
+    ? await Promise.all([
+        supabase
+          .from("community_google_properties")
+          .select("gsc_site_url, ga4_property_id")
+          .eq("community_id", id)
+          .maybeSingle(),
+        supabase
+          .from("company_google_connections")
+          .select("company_id")
+          .eq("company_id", companyId)
+          .maybeSingle(),
+      ])
+    : [{ data: null }, { data: null }];
 
   if (error) {
     return (
@@ -56,7 +73,7 @@ export default async function EditCommunityPage({
           </Button>
         }
       />
-      <div className="mx-auto w-full max-w-2xl">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Community details</CardTitle>
@@ -65,6 +82,33 @@ export default async function EditCommunityPage({
             <CommunityForm initial={typedCommunity} />
           </CardContent>
         </Card>
+        {companyId ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Google properties</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Map Search Console and GA4 for this community only. Other
+                communities under the same organization can use different
+                properties.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <CommunityGooglePropertiesForm
+                communityId={id}
+                companyId={companyId}
+                websiteUrl={typedCommunity.website_url}
+                initialGscSiteUrl={
+                  (googleProps?.gsc_site_url as string | null) ?? null
+                }
+                initialGa4PropertyId={
+                  (googleProps?.ga4_property_id as string | null) ?? null
+                }
+                googleConnected={Boolean(googleConn)}
+                companyHubHref={`/companies/${companyId}#google-integrations`}
+              />
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </>
   );

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
   FREE_PLAN_LIMITS,
+  TRIAL_PLAN_LIMITS,
   UNLIMITED_PLAN_LIMITS,
   resolvePlanLimits,
   type PlanLimits,
@@ -61,6 +62,15 @@ export async function loadBillingContext(
       unlimited: true,
       plan: subRow?.plan ?? null,
       limits: UNLIMITED_PLAN_LIMITS,
+      companyIds,
+    };
+  }
+
+  if (subRow?.status === "trialing") {
+    return {
+      unlimited: false,
+      plan: subRow.plan ?? null,
+      limits: TRIAL_PLAN_LIMITS,
       companyIds,
     };
   }

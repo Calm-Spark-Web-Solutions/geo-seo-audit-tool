@@ -106,7 +106,7 @@ export function RecentScansTable({
             No scans yet. Run a visibility scan from a community page.
           </p>
         ) : (
-          rows.map((s, i) => (
+          rows.map((s) => (
             <Link
               key={s.id}
               href={`/visibility-scans/${s.id}`}

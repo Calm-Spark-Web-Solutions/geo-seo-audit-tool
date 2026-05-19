@@ -173,6 +173,7 @@ export default async function DashboardPage({
   }
 
   // ── Score aggregations ────────────────────────────────────────────────────
+  // eslint-disable-next-line react-hooks/purity -- async Server Component; snapshot once per request for 30d windows
   const now = Date.now();
   const ms30d = 30 * 24 * 60 * 60 * 1000;
 

@@ -34,13 +34,11 @@ export interface PublicTierCard {
   yearlyUnitUsd: number;
 }
 
-function tierBullets(planKey: CheckoutTierPriceKey, extras: string[]): string[] {
-  const limits = PLAN_LIMITS_BY_SLUG[planKey];
-  const scanLine =
-    limits.monthlyScans === null
-      ? "Unlimited audit starts per community"
-      : `${limits.monthlyScans} audit starts per community per month`;
-  return [scanLine, "Rescans of already-tracked pages are always free", ...extras];
+function tierBullets(extras: string[]): string[] {
+  return [
+    "Rescans of already-tracked pages are always free · 1 free auto rescan/mo",
+    ...extras,
+  ];
 }
 
 /** Three public tiers shown as plan-builder picker cards + Partner callout. */
@@ -50,8 +48,8 @@ export const PUBLIC_TIERS: PublicTierCard[] = [
     name: `${TIER_PRICING.residence.label} per community`,
     tagline: TIER_PRICING.residence.tagline,
     limitsNote: formatPlanLimitsShort(PLAN_LIMITS_BY_SLUG.residence_monthly),
-    bullets: tierBullets("residence_monthly", [
-      "Full SEO + GEO audits",
+    bullets: tierBullets([
+      "Full SEO + GEO audits with AI commentary",
       "PDF export and audit history",
       "CrUX, PSI, and manual expert checklist",
     ]),
@@ -65,10 +63,9 @@ export const PUBLIC_TIERS: PublicTierCard[] = [
     name: `${TIER_PRICING.community.label} per community`,
     tagline: TIER_PRICING.community.tagline,
     limitsNote: formatPlanLimitsShort(PLAN_LIMITS_BY_SLUG.community_monthly),
-    bullets: tierBullets("community_monthly", [
+    bullets: tierBullets([
       `Everything in ${TIER_PRICING.residence.label}`,
-      "Bigger page roster and new-page allowance",
-      "Best for regional operators with several communities",
+      "150 tracked pages per community",
     ]),
     monthlyKey: "community_monthly",
     yearlyKey: "community_yearly",
@@ -80,10 +77,9 @@ export const PUBLIC_TIERS: PublicTierCard[] = [
     name: `${TIER_PRICING.portfolio.label} per community`,
     tagline: TIER_PRICING.portfolio.tagline,
     limitsNote: formatPlanLimitsShort(PLAN_LIMITS_BY_SLUG.portfolio_monthly),
-    bullets: tierBullets("portfolio_monthly", [
+    bullets: tierBullets([
       `Everything in ${TIER_PRICING.community.label}`,
-      "Highest tracked-page cap and monthly new-page allowance",
-      "Best for content-heavy or multi-brand sites",
+      "500 tracked pages per community",
     ]),
     monthlyKey: "portfolio_monthly",
     yearlyKey: "portfolio_yearly",

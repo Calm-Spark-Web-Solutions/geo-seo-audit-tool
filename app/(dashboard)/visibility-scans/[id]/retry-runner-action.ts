@@ -93,7 +93,12 @@ export async function retryAuditRunner(
     const serviceClient = createServiceClient();
     await serviceClient
       .from("audits")
-      .update({ status: "pending", pages_crawled: 0, progress_total: null })
+      .update({
+        status: "pending",
+        pages_crawled: 0,
+        progress_total: null,
+        fetch_failures: null,
+      })
       .eq("id", auditId);
     await enqueueAudit(serviceClient, auditId);
   }

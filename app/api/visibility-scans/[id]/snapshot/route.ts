@@ -34,12 +34,12 @@ const AUDIT_PAGES_SELECT_LIGHT_PRE_CATEGORY =
 const AUDIT_PAGES_SELECT_LIGHT_LEGACY = "id, url, score";
 
 const AUDIT_SELECT_FULL =
-  "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, site_wide_checks, crux_field_checks, engine_version, created_at";
+  "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, fetch_failures, site_wide_checks, crux_field_checks, google_field_checks, google_metrics, engine_version, created_at";
 // Light shape skips the large JSONB columns. They only change at run-start
 // (site_wide / crux_field), so the client merges light updates over the
 // initial server-rendered audit row.
 const AUDIT_SELECT_LIGHT =
-  "id, status, score, seo_score, geo_score, pages_crawled, progress_total";
+  "id, status, score, seo_score, geo_score, pages_crawled, progress_total, fetch_failures";
 
 /** PostgREST/Postgres when migration 017 not applied yet on a database. */
 function isMissingExcludeColumnError(err: { message?: string } | null): boolean {

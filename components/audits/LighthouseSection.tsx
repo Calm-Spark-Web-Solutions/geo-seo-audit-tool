@@ -5,7 +5,6 @@ import { RefreshAuditPageButtons } from "@/components/audits/RefreshAuditPageBut
 import { ScoreRing } from "@/components/audits/ScoreRing";
 
 import { PSI_CATEGORY_KEYS, type PsiCategoryKey } from "@/lib/audit/psi-keys";
-import { cn } from "@/lib/utils";
 import type { AuditCheck, AuditCheckEvidenceItem, CheckResult } from "@/types";
 import {
   Card,
@@ -32,13 +31,6 @@ function ResultIcon({ result }: { result: CheckResult }) {
       <CircleAlert className="h-4 w-4 text-amber-600 dark:text-amber-500" aria-hidden />
     );
   return <CircleX className="h-4 w-4 text-destructive" aria-hidden />;
-}
-
-function scoreTone(score: number | undefined): string {
-  if (typeof score !== "number") return "text-muted-foreground";
-  if (score >= 90) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 50) return "text-amber-600 dark:text-amber-400";
-  return "text-destructive";
 }
 
 export function LighthouseSection({

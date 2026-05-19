@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { recalculateAuditRollupScores } from "@/lib/audit/rollup-scores";
-import { fetchPageWithMeta } from "@/lib/crawler/fetch";
+import { tryFetchPageWithMeta } from "@/lib/crawler/fetch";
+import { PAGE_FETCH_TIMEOUT_MS } from "@/lib/crawler/fetch-pages";
 import {
   DEFAULT_USER_AGENT,
   normalizeUrl,
+  preferTrailingSlashFetchUrl,
   sameAuditSiteOrigin,
 } from "@/lib/crawler/normalize";
 import {
@@ -14,8 +16,6 @@ import {
 import { runPsi } from "@/lib/scoring/psi";
 import { scoreAndAnalyzePage } from "@/lib/scoring";
 import type { AuditCheck } from "@/types";
-
-const FETCH_TIMEOUT_MS = 8000;
 
 export type RefreshAuditPageMode = "psi" | "full";
 
@@ -249,12 +249,15 @@ export async function refreshAuditPageFull(
   const loaded = await loadPageCommunityContext(supabase, auditId, pageId);
   if ("error" in loaded) return loaded.error;
 
-  const got = await fetchPageWithMeta(loaded.pageUrl, {
-    timeoutMs: FETCH_TIMEOUT_MS,
-    userAgent: DEFAULT_USER_AGENT,
-  });
+  const outcome = await tryFetchPageWithMeta(
+    preferTrailingSlashFetchUrl(loaded.pageUrl),
+    {
+      timeoutMs: PAGE_FETCH_TIMEOUT_MS,
+      userAgent: DEFAULT_USER_AGENT,
+    },
+  );
 
-  if (!got) {
+  if (!outcome.ok) {
     return {
       ok: false,
       code: "fetch_failed",
@@ -264,8 +267,8 @@ export async function refreshAuditPageFull(
 
   const scored = await scoreAndAnalyzePage({
     url: loaded.pageUrl,
-    html: got.html,
-    fetchMeta: got.meta,
+    html: outcome.html,
+    fetchMeta: outcome.meta,
   });
 
   const effectiveScore =

@@ -12,10 +12,31 @@ import {
 const HTML_MAX_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECT_HOPS = 8;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const DEFAULT_FETCH_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = [0, 600, 1200];
+
+export type FetchPageFailureReason =
+  | "ssrf_guard_rejected"
+  | "deadline_exceeded"
+  | "redirect_chain_duplicate"
+  | "fetch_network_or_abort"
+  | "non_html_content_type"
+  | "redirect_missing_location"
+  | "redirect_location_invalid"
+  | "redirect_target_revisit"
+  | "http_non_success"
+  | "redirect_max_hops_exceeded";
+
+const RETRYABLE_FAILURE_REASONS = new Set<FetchPageFailureReason>([
+  "fetch_network_or_abort",
+  "deadline_exceeded",
+]);
 
 export interface FetchPageOptions {
   timeoutMs?: number;
   userAgent?: string;
+  /** Transient network/timeouts are retried up to this many attempts. */
+  maxAttempts?: number;
 }
 
 export interface PageFetchMeta {
@@ -36,6 +57,10 @@ export interface FetchPageWithMetaResult {
   meta: PageFetchMeta;
 }
 
+export type FetchPageOutcome =
+  | { ok: true; html: string; meta: PageFetchMeta }
+  | { ok: false; reason: FetchPageFailureReason };
+
 function safeHostname(url: string): string {
   try {
     return new URL(url).hostname;
@@ -53,10 +78,14 @@ function safePathnameDev(url: string): string | undefined {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Structured diagnosis when HTML fetch gives up (no secrets / minimal PII). */
 function logAuditFetchFailure(args: {
   requestUrl: string;
-  reason: string;
+  reason: FetchPageFailureReason;
   status?: number;
   contentType?: string;
 }): void {
@@ -79,13 +108,12 @@ function logAuditFetchFailure(args: {
 }
 
 /**
- * Fetch HTML with manual redirect handling so we can record hop count,
- * statuses, and loop detection. SSRF-guarded on every hop.
+ * Single fetch attempt with manual redirect handling. Does not log or retry.
  */
-export async function fetchPageWithMeta(
+async function fetchPageWithMetaOnce(
   startUrl: string,
   options: FetchPageOptions = {},
-): Promise<FetchPageWithMetaResult | null> {
+): Promise<FetchPageOutcome> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_CRAWL_TIMEOUT_MS;
   const userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
   const deadline = Date.now() + timeoutMs;
@@ -97,38 +125,22 @@ export async function fetchPageWithMeta(
   try {
     await assertSafeUrl(startUrl);
   } catch {
-    logAuditFetchFailure({
-      requestUrl: startUrl,
-      reason: "ssrf_guard_rejected",
-    });
-    return null;
+    return { ok: false, reason: "ssrf_guard_rejected" };
   }
 
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
     if (Date.now() > deadline) {
-      logAuditFetchFailure({
-        requestUrl: current,
-        reason: "deadline_exceeded",
-      });
-      return null;
+      return { ok: false, reason: "deadline_exceeded" };
     }
 
     try {
       await assertSafeUrl(current);
     } catch {
-      logAuditFetchFailure({
-        requestUrl: current,
-        reason: "ssrf_guard_rejected",
-      });
-      return null;
+      return { ok: false, reason: "ssrf_guard_rejected" };
     }
 
     if (visited.has(current)) {
-      logAuditFetchFailure({
-        requestUrl: current,
-        reason: "redirect_chain_duplicate",
-      });
-      return null;
+      return { ok: false, reason: "redirect_chain_duplicate" };
     }
     visited.add(current);
 
@@ -153,11 +165,7 @@ export async function fetchPageWithMeta(
         decompress: true,
       });
     } catch {
-      logAuditFetchFailure({
-        requestUrl: current,
-        reason: "fetch_network_or_abort",
-      });
-      return null;
+      return { ok: false, reason: "fetch_network_or_abort" };
     }
 
     const status = res.status;
@@ -166,13 +174,7 @@ export async function fetchPageWithMeta(
     if (status >= 200 && status < 300) {
       const ct = String(res.headers["content-type"] ?? "");
       if (!ct.includes("html")) {
-        logAuditFetchFailure({
-          requestUrl: current,
-          reason: "non_html_content_type",
-          status,
-          contentType: ct,
-        });
-        return null;
+        return { ok: false, reason: "non_html_content_type" };
       }
       const text = typeof res.data === "string" ? res.data : String(res.data ?? "");
       const responseHeadersLower: Record<string, string> = {};
@@ -182,6 +184,7 @@ export async function fetchPageWithMeta(
       const finalUrl = current;
       const redirectHopCount = Math.max(0, chain.length - 1);
       return {
+        ok: true,
         html: text,
         meta: {
           finalUrl,
@@ -196,50 +199,72 @@ export async function fetchPageWithMeta(
     if (REDIRECT_STATUSES.has(status)) {
       const loc = (res.headers["location"] as string | undefined)?.trim();
       if (!loc) {
-        logAuditFetchFailure({
-          requestUrl: current,
-          reason: "redirect_missing_location",
-          status,
-        });
-        return null;
+        return { ok: false, reason: "redirect_missing_location" };
       }
       let next: string;
       try {
         next = new URL(loc, current).href;
       } catch {
-        logAuditFetchFailure({
-          requestUrl: current,
-          reason: "redirect_location_invalid",
-          status,
-        });
-        return null;
+        return { ok: false, reason: "redirect_location_invalid" };
       }
       if (visited.has(next)) {
-        chain.push({ url: next, status: 0 });
-        logAuditFetchFailure({
-          requestUrl: next,
-          reason: "redirect_target_revisit",
-          status,
-        });
-        return null;
+        return { ok: false, reason: "redirect_target_revisit" };
       }
       current = next;
       continue;
     }
 
-    logAuditFetchFailure({
-      requestUrl: current,
-      reason: "http_non_success",
-      status,
-    });
-    return null;
+    return { ok: false, reason: "http_non_success" };
   }
 
-  logAuditFetchFailure({
-    requestUrl: startUrl,
-    reason: "redirect_max_hops_exceeded",
-  });
-  return null;
+  return { ok: false, reason: "redirect_max_hops_exceeded" };
+}
+
+/**
+ * Fetch HTML with retries on transient network/timeouts. Returns structured
+ * success or failure (including the final failure reason).
+ */
+export async function tryFetchPageWithMeta(
+  startUrl: string,
+  options: FetchPageOptions = {},
+): Promise<FetchPageOutcome> {
+  const maxAttempts = Math.max(
+    1,
+    options.maxAttempts ?? DEFAULT_FETCH_ATTEMPTS,
+  );
+  let last: FetchPageOutcome = { ok: false, reason: "fetch_network_or_abort" };
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      const backoff =
+        RETRY_BACKOFF_MS[attempt] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1];
+      await sleep(backoff);
+    }
+    last = await fetchPageWithMetaOnce(startUrl, options);
+    if (last.ok) return last;
+    if (!RETRYABLE_FAILURE_REASONS.has(last.reason)) break;
+  }
+
+  if (!last.ok) {
+    logAuditFetchFailure({
+      requestUrl: startUrl,
+      reason: last.reason,
+    });
+  }
+  return last;
+}
+
+/**
+ * Fetch HTML with manual redirect handling so we can record hop count,
+ * statuses, and loop detection. SSRF-guarded on every hop.
+ */
+export async function fetchPageWithMeta(
+  startUrl: string,
+  options: FetchPageOptions = {},
+): Promise<FetchPageWithMetaResult | null> {
+  const outcome = await tryFetchPageWithMeta(startUrl, options);
+  if (!outcome.ok) return null;
+  return { html: outcome.html, meta: outcome.meta };
 }
 
 /**

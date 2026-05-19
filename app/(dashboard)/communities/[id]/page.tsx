@@ -6,17 +6,28 @@ import { DeleteAuditButton } from "@/components/audits/DeleteAuditButton";
 import { RerunVisibilityScanButton } from "@/components/audits/RerunVisibilityScanButton";
 import { StatusBadge } from "@/components/audits/StatusBadge";
 import { AuditTrend } from "@/components/communities/AuditTrend";
+import { GoogleMetricsCard } from "@/components/communities/GoogleMetricsCard";
+import { RefreshGoogleMetricsButton } from "@/components/communities/RefreshGoogleMetricsButton";
+import { CommunityManualChecklist } from "@/components/communities/CommunityManualChecklist";
 import { DeleteCommunityButton } from "@/components/communities/DeleteCommunityButton";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
+import { crawlCoverageLabel, scanCoverageKind } from "@/lib/audit/partial-crawl";
+import { ScanCoverageBadge } from "@/components/audits/ScanCoverageBadge";
 import {
   AUDIT_RETRY_PENDING_HINT,
   AUDIT_RUNNING_EXPECTATION_SHORT,
 } from "@/lib/audit/reader-copy";
 import { createClient } from "@/lib/supabase/server";
-import type { Audit, Community } from "@/types";
+import { EXPERT_CHECKLIST_CARD_DESCRIPTION } from "@/lib/checklists/expert-checklist-copy";
+import type {
+  Audit,
+  Community,
+  CommunityGoogleMetricsSnapshot,
+  CommunityManualResults,
+} from "@/types";
 
 export const dynamic = "force-dynamic";
 
@@ -28,22 +39,40 @@ export default async function CommunityDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: community, error }, { data: audits }] = await Promise.all([
+  const [
+    { data: community, error },
+    { data: audits },
+    { data: metricsRows },
+    { data: googleProps },
+  ] = await Promise.all([
     supabase
       .from("communities")
       .select(
-        "id, company_id, name, website_url, facility_type, created_at, companies(id, name)",
+        "id, company_id, name, website_url, facility_type, manual_check_results, created_at, companies(id, name)",
       )
       .eq("id", id)
       .maybeSingle(),
     supabase
       .from("audits")
       .select(
-        "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, created_at",
+        "id, community_id, status, score, seo_score, geo_score, pages_crawled, progress_total, fetch_failures, created_at",
       )
       .eq("community_id", id)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("community_google_metrics_snapshots")
+      .select(
+        "community_id, snapshot_date, gsc_clicks_28d, gsc_impressions_28d, ga4_sessions_28d, ga4_active_users_28d, source, audit_id",
+      )
+      .eq("community_id", id)
+      .order("snapshot_date", { ascending: false })
+      .limit(60),
+    supabase
+      .from("community_google_properties")
+      .select("gsc_site_url, ga4_property_id")
+      .eq("community_id", id)
+      .maybeSingle(),
   ]);
 
   if (error) {
@@ -66,7 +95,17 @@ export default async function CommunityDetailPage({
     ? typedCommunity.companies[0] ?? null
     : typedCommunity.companies;
   const typedAudits = (audits ?? []) as Audit[];
-
+  const metricsSnapshots = (metricsRows ??
+    []) as CommunityGoogleMetricsSnapshot[];
+  const latestMetrics = metricsSnapshots[0] ?? null;
+  const googleMapped = {
+    gsc: Boolean(googleProps?.gsc_site_url?.trim()),
+    ga4: Boolean(googleProps?.ga4_property_id?.trim()),
+  };
+  const showGoogleMetrics = googleMapped.gsc || googleMapped.ga4;
+  const manualResults =
+    (typedCommunity.manual_check_results as CommunityManualResults | null) ??
+    null;
   return (
     <>
       <PageHeader
@@ -116,7 +155,17 @@ export default async function CommunityDetailPage({
         }
       />
 
-      <AuditTrend audits={typedAudits} />
+      {showGoogleMetrics ? (
+        <div className="flex flex-col gap-3">
+          <GoogleMetricsCard
+            metrics={latestMetrics}
+            mapped={googleMapped}
+          />
+          <RefreshGoogleMetricsButton communityId={id} />
+        </div>
+      ) : null}
+
+      <AuditTrend audits={typedAudits} metricsSnapshots={metricsSnapshots} />
 
       <div className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Visibility scan history</h2>
@@ -144,13 +193,8 @@ export default async function CommunityDetailPage({
                 audit.status === "pending" &&
                 total > 0 &&
                 audit.pages_crawled === 0;
-              const detail = isRunning
-                ? total > 0
-                  ? `${audit.pages_crawled} / ${total} pages`
-                  : "starting…"
-                : audit.pages_crawled
-                  ? `${audit.pages_crawled} page${audit.pages_crawled === 1 ? "" : "s"}`
-                  : "no pages";
+              const coverageKind = scanCoverageKind(audit);
+              const detail = crawlCoverageLabel(audit);
 
               return (
                 <div
@@ -163,6 +207,7 @@ export default async function CommunityDetailPage({
                   >
                     <span className="flex shrink-0 items-center gap-1.5">
                       <StatusBadge status={audit.status} />
+                      <ScanCoverageBadge kind={coverageKind} />
                       {isRunning ? (
                         <Loader2
                           className="h-3.5 w-3.5 animate-spin text-muted-foreground"
@@ -210,6 +255,13 @@ export default async function CommunityDetailPage({
           </div>
         )}
       </div>
+
+      <CommunityManualChecklist
+        communityId={typedCommunity.id}
+        initialResults={manualResults}
+        cardDescription={EXPERT_CHECKLIST_CARD_DESCRIPTION}
+        variant="collapsible"
+      />
     </>
   );
 }

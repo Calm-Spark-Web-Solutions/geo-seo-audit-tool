@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "app/**/*.{ts,tsx}",
+    "proxy.ts",
+    "instrumentation-client.ts",
+    "sentry.server.config.ts",
+    "sentry.edge.config.ts"
+  ],
+  "project": ["**/*.{ts,tsx}", "!**/*.test.{ts,tsx}"],
+  "ignore": ["types/database.ts", "scripts/**", ".next/**", "next-env.d.ts"],
+  "ignoreDependencies": ["supabase", "tailwindcss", "postcss"],
+  "ignoreExportsUsedInFile": true
+}

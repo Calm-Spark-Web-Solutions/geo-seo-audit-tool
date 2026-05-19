@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { hasPsiCategories } from "./psi-keys";
-import { findPagesMissingPsi } from "./psi-retry";
+import {
+  MAX_DRAIN_PASSES,
+  findPagesMissingPsi,
+  shouldChainPsiDrain,
+} from "./psi-retry";
 import type { AuditCheck } from "@/types";
 
 function check(key: string): AuditCheck {
@@ -101,5 +105,40 @@ describe("findPagesMissingPsi", () => {
     const supabase = stubSupabase([]);
     const out = await findPagesMissingPsi(supabase, "audit-1");
     expect(out).toEqual([]);
+  });
+});
+
+describe("shouldChainPsiDrain", () => {
+  it("stops when no pages remain missing", () => {
+    expect(shouldChainPsiDrain(0, { attempted: 6, recovered: 4 }, 0)).toBe(
+      false,
+    );
+  });
+
+  it("stops when nothing was attempted (no PSI key or empty audit)", () => {
+    expect(shouldChainPsiDrain(0, { attempted: 0, recovered: 0 }, 5)).toBe(
+      false,
+    );
+  });
+
+  it("stops when a pass made no progress", () => {
+    expect(shouldChainPsiDrain(0, { attempted: 6, recovered: 0 }, 5)).toBe(
+      false,
+    );
+  });
+
+  it("stops at the last allowed pass index", () => {
+    expect(
+      shouldChainPsiDrain(MAX_DRAIN_PASSES - 1, { attempted: 6, recovered: 2 }, 3),
+    ).toBe(false);
+  });
+
+  it("chains when pages remain and the pass recovered at least one", () => {
+    expect(shouldChainPsiDrain(0, { attempted: 6, recovered: 2 }, 7)).toBe(
+      true,
+    );
+    expect(
+      shouldChainPsiDrain(MAX_DRAIN_PASSES - 2, { attempted: 6, recovered: 1 }, 1),
+    ).toBe(true);
   });
 });

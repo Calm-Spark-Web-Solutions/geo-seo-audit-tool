@@ -160,6 +160,7 @@ export type Database = {
       audits: {
         Row: {
           community_id: string
+          consumes_manual_quota: boolean
           created_at: string | null
           engine_version: number
           geo_score: number | null
@@ -175,11 +176,13 @@ export type Database = {
           site_wide_checks: Json | null
           crux_field_checks: Json | null
           near_duplicate_checks: Json | null
+          fetch_failures: Json | null
           status: string
           target_urls: string[] | null
         }
         Insert: {
           community_id: string
+          consumes_manual_quota?: boolean
           created_at?: string | null
           engine_version?: number
           geo_score?: number | null
@@ -195,11 +198,13 @@ export type Database = {
           site_wide_checks?: Json | null
           crux_field_checks?: Json | null
           near_duplicate_checks?: Json | null
+          fetch_failures?: Json | null
           status?: string
           target_urls?: string[] | null
         }
         Update: {
           community_id?: string
+          consumes_manual_quota?: boolean
           created_at?: string | null
           engine_version?: number
           geo_score?: number | null
@@ -215,6 +220,7 @@ export type Database = {
           site_wide_checks?: Json | null
           crux_field_checks?: Json | null
           near_duplicate_checks?: Json | null
+          fetch_failures?: Json | null
           status?: string
           target_urls?: string[] | null
         }

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   subscriptionRowAllowsProductUse,
   userAllowedPaidProductFeatures,
+  userAllowedPdfExport,
 } from "./subscription-access";
 
 describe("subscriptionRowAllowsProductUse", () => {
@@ -28,7 +29,7 @@ describe("userAllowedPaidProductFeatures", () => {
     );
   });
 
-  it("requires active row when Stripe is configured", () => {
+  it("requires active or trialing when Stripe is configured", () => {
     expect(userAllowedPaidProductFeatures(true, null)).toBe(false);
     expect(userAllowedPaidProductFeatures(true, { status: "canceled" })).toBe(
       false,
@@ -36,11 +37,33 @@ describe("userAllowedPaidProductFeatures", () => {
     expect(userAllowedPaidProductFeatures(true, { status: "active" })).toBe(
       true,
     );
+    expect(userAllowedPaidProductFeatures(true, { status: "trialing" })).toBe(
+      true,
+    );
   });
 
   it("honors ALLOW_AUDITS_WITHOUT_SUBSCRIPTION when Stripe configured", () => {
     vi.stubEnv("ALLOW_AUDITS_WITHOUT_SUBSCRIPTION", "1");
     expect(userAllowedPaidProductFeatures(true, null)).toBe(true);
+    vi.unstubAllEnvs();
+  });
+});
+
+describe("userAllowedPdfExport", () => {
+  it("allows when Stripe is not configured", () => {
+    expect(userAllowedPdfExport(false, null)).toBe(true);
+    expect(userAllowedPdfExport(false, { status: "trialing" })).toBe(true);
+  });
+
+  it("requires active status when Stripe is configured", () => {
+    expect(userAllowedPdfExport(true, null)).toBe(false);
+    expect(userAllowedPdfExport(true, { status: "trialing" })).toBe(false);
+    expect(userAllowedPdfExport(true, { status: "active" })).toBe(true);
+  });
+
+  it("honors ALLOW_AUDITS_WITHOUT_SUBSCRIPTION when Stripe configured", () => {
+    vi.stubEnv("ALLOW_AUDITS_WITHOUT_SUBSCRIPTION", "1");
+    expect(userAllowedPdfExport(true, { status: "trialing" })).toBe(true);
     vi.unstubAllEnvs();
   });
 });

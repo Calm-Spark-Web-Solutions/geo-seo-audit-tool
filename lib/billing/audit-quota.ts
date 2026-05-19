@@ -2,8 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isStripeConfigured } from "@/lib/stripe/server";
 import {
+  TRIAL_PLAN_LIMITS,
   effectiveMonthlyScans,
   resolvePlanLimits,
+  trialWindowFromPlanLimits,
 } from "@/lib/billing/plan-limits";
 import { userAllowedPaidProductFeatures } from "@/lib/billing/subscription-access";
 
@@ -71,6 +73,76 @@ export async function getAuditQuotaSnapshot(
     return { kind: "unlimited" };
   }
 
+  if (subRow?.status === "trialing") {
+    const limit =
+      effectiveMonthlyScans(TRIAL_PLAN_LIMITS, TRIAL_PLAN_LIMITS.communities) ??
+      3;
+    const tw = trialWindowFromPlanLimits(subRow.plan_limits);
+    const { start, end, periodLabel } = tw
+      ? { start: tw.start, end: tw.end, periodLabel: "Trial period (UTC)" }
+      : utcMonthWindow();
+
+    const { data: memberships } = await supabase
+      .from("company_members")
+      .select("company_id")
+      .eq("user_id", userId);
+
+    const companyIds = [...new Set((memberships ?? []).map((m) => m.company_id))];
+    if (companyIds.length === 0) {
+      return {
+        kind: "limited",
+        used: 0,
+        limit,
+        remaining: limit,
+        periodLabel,
+      };
+    }
+
+    const { data: communities } = await supabase
+      .from("communities")
+      .select("id")
+      .in("company_id", companyIds);
+
+    const communityIds = (communities ?? []).map((c) => c.id as string);
+    if (communityIds.length === 0) {
+      return {
+        kind: "limited",
+        used: 0,
+        limit,
+        remaining: limit,
+        periodLabel,
+      };
+    }
+
+    const { count, error } = await supabase
+      .from("audits")
+      .select("id", { count: "exact", head: true })
+      .in("community_id", communityIds)
+      .eq("consumes_manual_quota", true)
+      .gte("created_at", start)
+      .lt("created_at", end);
+
+    if (error) {
+      console.warn("[audit-quota] trialing count failed:", error.message);
+      return {
+        kind: "limited",
+        used: 0,
+        limit,
+        remaining: limit,
+        periodLabel,
+      };
+    }
+
+    const used = count ?? 0;
+    return {
+      kind: "limited",
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      periodLabel,
+    };
+  }
+
   const planLimits = resolvePlanLimits(
     subRow?.plan ?? null,
     subRow?.plan_limits ?? null,
@@ -120,6 +192,7 @@ export async function getAuditQuotaSnapshot(
     .from("audits")
     .select("id", { count: "exact", head: true })
     .in("community_id", communityIds)
+    .eq("consumes_manual_quota", true)
     .gte("created_at", start)
     .lt("created_at", end);
 

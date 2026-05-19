@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import type { Element } from "domhandler";
 
 import type { PageFetchMeta } from "@/lib/crawler/fetch";
 import { normalizeUrl, sameOrigin } from "@/lib/crawler/normalize";
@@ -10,6 +11,14 @@ import type {
   FixItem,
 } from "@/types";
 
+import {
+  contentFind,
+  contentText,
+  isInChrome,
+  isInsideContentScope,
+  resolveMainContent,
+} from "./content-scope";
+import { buildPerPageAnalyticsChecks } from "./analytics-tags";
 import { structuredDataOfflineHeuristics } from "./schema-heuristic";
 
 /** Hard cap on stored evidence items per check (override via AUDIT_EVIDENCE_MAX_ITEMS). */
@@ -142,6 +151,8 @@ export function runDeterministicChecks(
   options?: DeterministicOptions,
 ): DeterministicResult {
   const $ = cheerio.load(html);
+  const contentScope = resolveMainContent($);
+  const mainContentText = contentText(contentScope);
   const ldScriptsEarly = $('script[type="application/ld+json"]').toArray();
 
   // ---------- existing SEO checks ----------
@@ -154,7 +165,7 @@ export function runDeterministicChecks(
       : titleLen === 0
         ? "fail"
         : "warn";
-  let titleExplanation =
+  const titleExplanation =
     titleLen === 0
       ? "Missing <title> tag."
       : titleLen < 50
@@ -172,7 +183,7 @@ export function runDeterministicChecks(
       : descLen === 0
         ? "fail"
         : "warn";
-  let descExplanation =
+  const descExplanation =
     descLen === 0
       ? "Missing meta description."
       : descLen < 140
@@ -432,7 +443,7 @@ export function runDeterministicChecks(
       'nav[aria-label*="breadcrumb" i], nav[aria-labelledby*="breadcrumb" i], [role="navigation"][aria-label*="breadcrumb" i]',
     ).length > 0;
 
-  const headingLevels = $("h1, h2, h3, h4, h5, h6")
+  const headingLevels = contentFind(contentScope, "h1, h2, h3, h4, h5, h6")
     .toArray()
     .map((el) => parseInt(el.tagName[1], 10));
   let headingSkip = false;
@@ -454,7 +465,7 @@ export function runDeterministicChecks(
         ? "Heading levels appear to skip (e.g. H2→H4); keep a contiguous outline when possible."
         : "Heading levels progress without skipped ranks.";
 
-  const subheadingEls = $("h2, h3, h4").toArray();
+  const subheadingEls = contentFind(contentScope, "h2, h3, h4").toArray();
   const h234Count = subheadingEls.length;
   const subheadResult: CheckResult =
     h234Count >= 2 ? "pass" : h234Count === 1 ? "warn" : "fail";
@@ -841,14 +852,11 @@ export function runDeterministicChecks(
 
   // ---------- existing GEO checks ----------
 
-  const bodyClone = $("body").clone();
-  bodyClone.find("script, style, noscript").remove();
-  const bodyText = bodyClone.text().replace(/\s+/g, " ").trim();
-  const words = bodyText.split(" ").filter(Boolean);
+  const words = mainContentText.split(" ").filter(Boolean);
   const wordCount = words.length;
   const wcResult: CheckResult =
     wordCount >= 300 ? "pass" : wordCount >= 150 ? "warn" : "fail";
-  const wcExplanation = `About ${wordCount} words visible in main content. GEO-friendly pages often exceed 300 words.`;
+  const wcExplanation = `About ${wordCount} words in primary content (excluding header, footer, and navigation). GEO-friendly pages often exceed 300 words.`;
 
   const hasArticleOrMain = $("article").length > 0 || $("main").length > 0;
   const structResult: CheckResult = hasArticleOrMain ? "pass" : "warn";
@@ -857,13 +865,14 @@ export function runDeterministicChecks(
     : "No <article> or <main> landmark; consider clearer content hierarchy.";
 
   let faqResult: CheckResult = "fail";
-  let faqExplanation = "No FAQ-style heading found.";
-  const headings = $("h2, h3").toArray();
+  let faqExplanation = "No FAQ-style heading found in primary content.";
+  const headings = contentFind(contentScope, "h2, h3").toArray();
   for (const el of headings) {
     const t = $(el).text();
     if (/\?/.test(t)) {
       faqResult = "pass";
-      faqExplanation = "Found a heading that looks FAQ-style (contains '?').";
+      faqExplanation =
+        "Found a heading in primary content that looks FAQ-style (contains '?').";
       break;
     }
   }
@@ -883,55 +892,81 @@ export function runDeterministicChecks(
         ? `${ldParseFailures} of ${totalLdBlocks} JSON-LD block(s) failed JSON parse — fix malformed scripts.`
         : "All JSON-LD blocks parse as valid JSON.";
 
-  // Count ALL same-origin links for the score, but only surface links found
-  // outside <nav>, <header>, and <footer> in the inspector evidence — nav and
-  // footer links dominate every page and obscure the content-level link picture.
+  // Score and sample in-content links only (primary content scope, not chrome).
   const MAX_PROBE_TARGETS = 18;
-  let internalLinks = 0;
   let contentLinks = 0;
-  const seenHrefs = new Set<string>();
+  let chromeLinks = 0;
   const seenContentHrefs = new Set<string>();
+  const seenChromeHrefs = new Set<string>();
   const linkItems: AuditCheckEvidenceItem[] = [];
+  const chromeLinkItems: AuditCheckEvidenceItem[] = [];
   const internalLinkTargets: string[] = [];
+
+  const pushLinkSample = (
+    items: AuditCheckEvidenceItem[],
+    seen: Set<string>,
+    abs: string,
+    el: Element,
+  ) => {
+    if (seen.has(abs) || items.length >= cap) return;
+    seen.add(abs);
+    const anchor = $(el).text().replace(/\s+/g, " ").trim();
+    const rel = $(el).attr("rel")?.trim();
+    items.push({
+      type: "link",
+      url: abs,
+      anchor: anchor ? snippetForUi(anchor, 120) : undefined,
+      ...(rel ? { rel } : {}),
+    });
+  };
+
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href");
     if (!href) return;
     const abs = normalizeUrl(href, pageUrl);
     if (!abs || !sameOrigin(pageUrl, abs)) return;
-    internalLinks += 1;
-    if (internalLinkTargets.length < MAX_PROBE_TARGETS && !seenContentHrefs.has(abs) && !seenHrefs.has(abs)) {
-      internalLinkTargets.push(abs);
-    }
-    const inChrome = $(el).closest("nav, header, footer").length > 0;
-    if (!inChrome) {
+
+    const inChrome = isInChrome($, el);
+    const inContent =
+      !inChrome && isInsideContentScope(contentScope, el);
+
+    if (inContent) {
       contentLinks += 1;
-      if (!seenContentHrefs.has(abs) && linkItems.length < cap) {
-        seenContentHrefs.add(abs);
-        const anchor = $(el).text().replace(/\s+/g, " ").trim();
-        const rel = $(el).attr("rel")?.trim();
-        linkItems.push({
-          type: "link",
-          url: abs,
-          anchor: anchor ? snippetForUi(anchor, 120) : undefined,
-          ...(rel ? { rel } : {}),
-        });
+      pushLinkSample(linkItems, seenContentHrefs, abs, el);
+      if (
+        internalLinkTargets.length < MAX_PROBE_TARGETS &&
+        !internalLinkTargets.includes(abs)
+      ) {
+        internalLinkTargets.push(abs);
       }
-    } else if (!seenHrefs.has(abs)) {
-      seenHrefs.add(abs);
+    } else {
+      chromeLinks += 1;
+      pushLinkSample(chromeLinkItems, seenChromeHrefs, abs, el);
     }
   });
+
   const linkResult: CheckResult =
-    internalLinks >= 5 ? "pass" : internalLinks >= 2 ? "warn" : "fail";
+    contentLinks >= 5 ? "pass" : contentLinks >= 2 ? "warn" : "fail";
   const navOnlyNote =
-    contentLinks === 0 && internalLinks > 0
-      ? " All links are in navigation/header/footer; consider adding in-body links to related pages."
+    contentLinks === 0 && chromeLinks > 0
+      ? " All internal links are in navigation, header, footer, or outside primary content; add contextual in-body links to related pages."
       : "";
   const linkExplanation =
-    `Found ${internalLinks} internal link(s) (${contentLinks} in body content, ${internalLinks - contentLinks} in nav/header/footer). Aim for at least 5 body-content links for strong internal linking.` +
+    `Found ${contentLinks} in-content internal link(s) and ${chromeLinks} in navigation/header/footer or outside primary content. Aim for at least 5 in-content links for strong internal linking.` +
     navOnlyNote;
   const linkEvidence: AuditCheckEvidence | undefined =
-    linkItems.length > 0
-      ? { totalCount: contentLinks, items: linkItems, inspector: "links" }
+    linkItems.length > 0 || chromeLinkItems.length > 0
+      ? {
+          totalCount: contentLinks,
+          items: linkItems,
+          ...(chromeLinks > 0
+            ? {
+                chromeTotalCount: chromeLinks,
+                chromeItems: chromeLinkItems,
+              }
+            : {}),
+          inspector: "links",
+        }
       : undefined;
 
   // ---------- structured data (granular) ----------
@@ -1061,7 +1096,7 @@ export function runDeterministicChecks(
 
   const titleLower = titleText.toLowerCase();
   const h1Text = $("h1").first().text().trim().toLowerCase();
-  const lowerBody = bodyText.toLowerCase();
+  const lowerBody = mainContentText.toLowerCase();
   const titleTokens = titleLower
     .replace(/[^a-z0-9 ]/g, " ")
     .split(/\s+/)
@@ -1085,7 +1120,8 @@ export function runDeterministicChecks(
     entityExplanation = "Title keywords are not echoed in the H1 or body.";
   }
 
-  const listCount = $("ul").length + $("ol").length;
+  const listCount =
+    contentFind(contentScope, "ul").length + contentFind(contentScope, "ol").length;
   const qaHeadingEls = headings.filter((el) => /\?/.test($(el).text()));
   const qaHeadings = qaHeadingEls.length;
   let lqResult: CheckResult;
@@ -1144,6 +1180,7 @@ export function runDeterministicChecks(
   let authorityLinkCount = 0;
   const externalLinkItems: AuditCheckEvidenceItem[] = [];
   $("a[href]").each((_, el) => {
+    if (isInChrome($, el)) return;
     const href = $(el).attr("href");
     if (!href) return;
     const abs = normalizeUrl(href, pageUrl);
@@ -1204,7 +1241,7 @@ export function runDeterministicChecks(
 
   // ---------- acronym <abbr> usage ----------
 
-  const abbrCount = $("abbr").length;
+  const abbrCount = contentFind(contentScope, "abbr").length;
   const abbrResult: CheckResult = abbrCount > 0 ? "pass" : "warn";
   const abbrExplanation =
     abbrCount > 0
@@ -1218,13 +1255,17 @@ export function runDeterministicChecks(
   // ---------- summary / takeaways block ----------
 
   const summaryClassPattern = /\b(summary|takeaway|key[-_]point|tldr|quick[-_]fact|highlights?)\b/i;
-  const summaryByClass = $("[class]").filter((_, el) => {
-    const cls = $(el).attr("class") ?? "";
-    return summaryClassPattern.test(cls);
-  }).length > 0;
-  const summaryByAside = $("aside").filter((_, el) => {
-    return $(el).find("ul, ol").length > 0;
-  }).length > 0;
+  const summaryByClass =
+    contentScope
+      .find("[class]")
+      .filter((_, el) => {
+        const cls = $(el).attr("class") ?? "";
+        return summaryClassPattern.test(cls);
+      }).length > 0;
+  const summaryByAside =
+    contentFind(contentScope, "aside").filter((_, el) => {
+      return $(el).find("ul, ol").length > 0;
+    }).length > 0;
   const hasSummaryBlock = summaryByClass || summaryByAside;
   const summaryResult: CheckResult = hasSummaryBlock ? "pass" : "warn";
   const summaryExplanation = hasSummaryBlock
@@ -1439,6 +1480,8 @@ export function runDeterministicChecks(
       pillar: "SEO",
     }),
   );
+
+  seoChecks.push(...buildPerPageAnalyticsChecks(html));
 
   const fixes = [...fixesFromChecks(seoChecks), ...fixesFromChecks(geoChecks)];
 

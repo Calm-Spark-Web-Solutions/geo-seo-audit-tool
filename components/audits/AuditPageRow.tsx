@@ -81,7 +81,7 @@ export function AuditPageRow({
   function handleRemove() {
     if (!removeEnabled || pendingRemove || !onRemoved) return;
     const ok = window.confirm(
-      `Remove this URL from the scan?\n${page.url}\nRollup scores will update; this does not delete the community roster.`,
+      `Remove this URL from the scan?\n${page.url}\nScan averages will update; this does not delete the community roster.`,
     );
     if (!ok) return;
     startRemoveTransition(async () => {
@@ -144,8 +144,12 @@ export function AuditPageRow({
       </a>
       <span className="flex shrink-0 items-center gap-2">
         {page.exclude_from_audit_score ? (
-          <Badge variant="secondary" className="hidden font-normal sm:inline-flex">
-            Rollup off
+          <Badge
+            variant="secondary"
+            className="hidden max-w-[9rem] truncate font-normal sm:inline-flex"
+            title="This page is not included in the scan's overall, SEO, or GEO averages."
+          >
+            Excluded from average
           </Badge>
         ) : null}
         <span className="text-sm font-semibold tabular-nums">

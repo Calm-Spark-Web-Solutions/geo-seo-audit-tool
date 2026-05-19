@@ -4,6 +4,14 @@
     {
       "path": "/api/visibility-scans/cron-tick",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/integrations/google/metrics-sync",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/monthly-google-report",
+      "schedule": "0 7 1 * *"
     }
   ]
 }

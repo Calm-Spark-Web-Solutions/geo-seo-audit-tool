@@ -1,6 +1,6 @@
 import type Stripe from "stripe";
 
-import { PACK_PRICING } from "@/lib/billing/plan-limits";
+import { PACK_PRICING, RUNS_PACK_PRICING } from "@/lib/billing/plan-limits";
 import {
   isCheckoutAddonPriceKey,
   isCheckoutTierPriceKey,
@@ -162,21 +162,31 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
 
 interface SubscriptionItemSummary {
   tier: { slug: string; quantity: number } | null;
-  pack: { slug: string; quantity: number } | null;
+  pagesPack: { slug: string; quantity: number } | null;
+  runsPack: { slug: string; quantity: number } | null;
   /** Raw price id of the first item, used for fallback labeling only. */
   firstPriceId: string | null;
 }
 
+function isPagesPackSlug(slug: string): boolean {
+  return slug === "pages_pack_monthly" || slug === "pages_pack_yearly";
+}
+
+function isRunsPackSlug(slug: string): boolean {
+  return slug === "runs_pack_monthly" || slug === "runs_pack_yearly";
+}
+
 /**
- * Iterate subscription items once, splitting them into a tier item and a
- * Page Pack add-on item. We assume at most one of each; if Stripe ever
- * sends two tier items (shouldn't happen in our flow), the first wins.
+ * Iterate subscription items once, splitting them into a tier item and
+ * optional Page Pack / Run Pack add-ons. If Stripe sends duplicate add-ons
+ * of the same kind, the first wins.
  */
 function classifySubscriptionItems(
   subscription: Stripe.Subscription,
 ): SubscriptionItemSummary {
   let tier: SubscriptionItemSummary["tier"] = null;
-  let pack: SubscriptionItemSummary["pack"] = null;
+  let pagesPack: SubscriptionItemSummary["pagesPack"] = null;
+  let runsPack: SubscriptionItemSummary["runsPack"] = null;
   let firstPriceId: string | null = null;
 
   for (const item of subscription.items.data) {
@@ -196,13 +206,19 @@ function classifySubscriptionItems(
       tier = { slug, quantity };
       continue;
     }
-    if (!pack && isCheckoutAddonPriceKey(slug)) {
-      pack = { slug, quantity };
-      continue;
+    if (isCheckoutAddonPriceKey(slug)) {
+      if (!pagesPack && isPagesPackSlug(slug)) {
+        pagesPack = { slug, quantity };
+        continue;
+      }
+      if (!runsPack && isRunsPackSlug(slug)) {
+        runsPack = { slug, quantity };
+        continue;
+      }
     }
   }
 
-  return { tier, pack, firstPriceId };
+  return { tier, pagesPack, runsPack, firstPriceId };
 }
 
 async function upsertSubscriptionFromStripe({
@@ -233,18 +249,39 @@ async function upsertSubscriptionFromStripe({
   // units (`newPagesPackBonusPerMonth = packs * newPagesPerUnit`).
   const communities = summary.tier?.quantity ?? 1;
   let newPagesPackBonusPerMonth = 0;
-  if (summary.pack && communities > 0) {
-    const packsPerCommunity = Math.floor(summary.pack.quantity / communities);
+  if (summary.pagesPack && communities > 0) {
+    const packsPerCommunity = Math.floor(summary.pagesPack.quantity / communities);
     newPagesPackBonusPerMonth = Math.max(
       0,
       packsPerCommunity * PACK_PRICING.newPagesPerUnit,
     );
   }
+  let monthlyScansPackBonusPerMonth = 0;
+  if (summary.runsPack && communities > 0) {
+    const runsPacksPerCommunity = Math.floor(
+      summary.runsPack.quantity / communities,
+    );
+    monthlyScansPackBonusPerMonth = Math.max(
+      0,
+      runsPacksPerCommunity * RUNS_PACK_PRICING.monthlyScansPerUnit,
+    );
+  }
 
-  const planLimits = {
+  const planLimits: Record<string, number | string> = {
     communities,
     newPagesPackBonusPerMonth,
-  } satisfies Record<string, number>;
+    monthlyScansPackBonusPerMonth,
+  };
+  if (typeof subscription.trial_start === "number") {
+    planLimits.billing_trial_start = new Date(
+      subscription.trial_start * 1000,
+    ).toISOString();
+  }
+  if (typeof subscription.trial_end === "number") {
+    planLimits.billing_trial_end = new Date(
+      subscription.trial_end * 1000,
+    ).toISOString();
+  }
 
   const service = createServiceClient();
   await service.from("subscriptions").upsert(

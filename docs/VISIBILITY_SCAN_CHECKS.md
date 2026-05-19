@@ -40,6 +40,8 @@ Deterministic parsing of each fetched page’s HTML (no browser). Checks are spl
 
 **GEO / hybrid (`geo_checks`; includes structured data and extractability)**
 
+Body-derived content checks (`word_count`, `faq_heading`, `lists_and_qa`, `entity_consistency`, `summary_block`, `acronym_abbr_usage`, `outbound_authority_links`, `blog_editorial_depth`) and scoped SEO structure checks (`heading_outline`, `subheading_depth`) evaluate **primary content** only: the first `<main>` or `<article>`, or `<body>` with `header`, `footer`, `nav`, and common ARIA chrome roles removed. See `lib/scoring/content-scope.ts`.
+
 | Key | Label (UI) |
 |-----|------------|
 | `img_alt` | Image alt text |
@@ -57,7 +59,9 @@ Deterministic parsing of each fetched page’s HTML (no browser). Checks are spl
 | `schema_item_list` | Schema: ItemList |
 | `schema_nap_signals` | Schema: NAP / contact hints |
 | *(plus dynamic offline rows — see below)* |
-| `internal_links` | Internal links |
+
+**Structured data inspector (per-page guidance):** The page inspector (`/inspectors/schema`) infers a page role via `lib/scoring/page-schema-role.ts`, `lib/scoring/page-schema-path-patterns.ts`, and `lib/scoring/page-schema-hints.ts` using, in order: **on-page JSON-LD @types** (e.g. `BlogPosting`, `ContactPage`), **host-agnostic URL path buckets** (homepage, contact, about, **facility** for `/facilities/` or `/campus/`, **service** for `/services/` or `/memory-care/`, blog, listing), then **title/H1** text from audit checks. Patterns are the same for every community domain in a scan—not tailored to a single client site. Each recommendation shows priority (required / recommended / optional), found vs not found, plus **confidence** (high / medium / low) and a short reason. Automated `schema_*` checks above still run the same rules on every URL until a future contextual-scoring phase.
+| `internal_links` | Internal links (in-content only; nav/footer tracked separately in inspector) |
 | `entity_consistency` | Entity consistency |
 | `lists_and_qa` | Lists and Q&A |
 
@@ -124,9 +128,12 @@ Core Web Vitals / lab audits (from Lighthouse audit numeric values when present)
 
 | Key | Label (UI) |
 |-----|------------|
-| `psi_lcp` | LCP (mobile) |
-| `psi_cls` | CLS (mobile) |
-| `psi_inp` | INP (mobile) |
+| `psi_lcp` | LCP (desktop, primary when PSI desktop data exists) |
+| `psi_cls` | CLS (desktop, primary when available) |
+| `psi_inp` | INP (desktop, primary when available) |
+| `psi_lcp_mobile` | LCP (mobile lab), when desktop CWV is present |
+| `psi_cls_mobile` | CLS (mobile lab), when desktop CWV is present |
+| `psi_inp_mobile` | INP (mobile lab), when desktop CWV is present |
 | `psi_mixed_content` | Mixed content |
 
 Optional **desktop** performance rollup when `PSI_RUN_DESKTOP=1` or `PSI_DESKTOP=true`:
@@ -174,6 +181,32 @@ Possible rows (new audits use **phone** and **desktop** cohort keys; legacy rows
 | `crux_phone_cls_p75` / `crux_desktop_cls_p75` | CrUX CLS (p75) — cohort |
 | `crux_phone_fcp_p75` / `crux_desktop_fcp_p75` | CrUX FCP (p75) — cohort |
 | `crux_lcp_p75` / `crux_inp_p75` / `crux_cls_p75` / `crux_fcp_p75` | Legacy CrUX metric keys *(older persisted audits)* |
+
+### Analytics tags (HTML, site-wide rollup)
+
+Per-page: `ga4_measurement_id` in `lib/scoring/analytics-tags.ts` (merged into per-page SEO checks). After crawl, site-wide rollup keys on `audits.site_wide_checks`:
+
+| Key | Label (UI) |
+|-----|------------|
+| `ga4_measurement_id` | GA4 tag (site-wide) |
+| `google_tag_manager` | Google Tag Manager *(warn when neither GA4 nor GTM on scored pages)* |
+
+### Google Search Console & GA4 API (`lib/integrations/google/field-checks.ts`)
+
+**Requires** company-level Google OAuth (`GOOGLE_OAUTH_*` env) and per-community property mapping. Stored on `audits.google_field_checks`; 28-day totals on `audits.google_metrics` and `community_google_metrics_snapshots`.
+
+| Key | Label (UI) |
+|-----|------------|
+| `gsc_property_linked` | GSC property linked |
+| `gsc_property_verified` | GSC property verified |
+| `gsc_sitemap_submitted` | GSC sitemap submitted |
+| `gsc_index_coverage` | GSC search visibility (28d) |
+| `ga4_property_linked` | GA4 property linked |
+| `ga4_data_received` | GA4 data received (28d) |
+| `google_oauth_token` | Google connection *(warn when refresh fails)* |
+| `google_api_error` | Google API *(warn on partial API failure)* |
+
+Expert checklist rows `gsc_sitemap_submitted` and `gsc_monitoring` remain manual; automated GSC checks appear separately on the scan report.
 
 ---
 
@@ -247,4 +280,6 @@ These are **not** produced by the automated scorer. They are template rows for h
 | PSI / Lighthouse | `lib/scoring/psi.ts` |
 | Site-wide probes | `lib/scoring/site-wide.ts` |
 | CrUX origin metrics | `lib/scoring/crux.ts` |
+| Analytics tag detection | `lib/scoring/analytics-tags.ts` |
+| GSC / GA4 OAuth & API checks | `lib/integrations/google/` |
 | Manual checklist template | `lib/checklists/community-manual.ts` |

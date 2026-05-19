@@ -9,7 +9,7 @@
  * pulling Supabase or other server-only modules.
  */
 
-import type { AuditCheck } from "@/types";
+import type { AuditCheck, AuditPage } from "@/types";
 
 export const PSI_CATEGORY_KEYS = [
   "psi_performance",
@@ -31,4 +31,19 @@ export function hasPsiCategories(checks: AuditCheck[]): boolean {
   return checks.some((c) =>
     (PSI_CATEGORY_KEYS as readonly string[]).includes(c.key),
   );
+}
+
+export function psiCoverageFromPages(pages: AuditPage[]): {
+  covered: number;
+  total: number;
+} {
+  const total = pages.length;
+  if (total === 0) return { covered: 0, total: 0 };
+  let covered = 0;
+  for (const page of pages) {
+    const seo = page.seo_results ?? [];
+    const geo = page.geo_results ?? [];
+    if (hasPsiCategories([...seo, ...geo])) covered += 1;
+  }
+  return { covered, total };
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import type { GoogleMappingStatus } from "@/lib/integrations/google/google-properties-ui";
 import type { Community } from "@/types";
 
 export type CommunityLatestAuditScores = {
@@ -11,13 +12,29 @@ export type CommunityLatestAuditScores = {
 interface Props {
   communities: Community[];
   latestAuditScores?: Record<string, CommunityLatestAuditScores>;
+  googleMappingStatusByCommunity?: Record<string, GoogleMappingStatus>;
+}
+
+function GoogleStatusCell({ status }: { status: GoogleMappingStatus | undefined }) {
+  if (!status || status === "none") {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  if (status === "mapped") {
+    return <span title="GSC and GA4 mapped">✓</span>;
+  }
+  return <span title="Partial mapping">◐</span>;
 }
 
 function ScoreCell({ value }: { value: number | null }) {
   return <span className="tabular-nums">{value ?? "—"}</span>;
 }
 
-export function CommunityTable({ communities, latestAuditScores = {} }: Props) {
+export function CommunityTable({
+  communities,
+  latestAuditScores = {},
+  googleMappingStatusByCommunity,
+}: Props) {
+  const showGoogle = Boolean(googleMappingStatusByCommunity);
   return (
     <div className="overflow-hidden rounded-md border border-border">
       <table className="w-full text-sm">
@@ -38,6 +55,11 @@ export function CommunityTable({ communities, latestAuditScores = {} }: Props) {
             <th className="hidden px-4 py-2 text-right font-medium text-muted-foreground md:table-cell">
               GEO
             </th>
+            {showGoogle ? (
+              <th className="hidden px-4 py-2 text-center font-medium text-muted-foreground lg:table-cell">
+                Google
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -94,6 +116,18 @@ export function CommunityTable({ communities, latestAuditScores = {} }: Props) {
                     <ScoreCell value={scores?.geo_score ?? null} />
                   </Link>
                 </td>
+                {showGoogle ? (
+                  <td className="hidden p-0 align-middle lg:table-cell">
+                    <Link
+                      href={`/communities/${c.id}`}
+                      className="block px-4 py-2.5 text-center transition-colors"
+                    >
+                      <GoogleStatusCell
+                        status={googleMappingStatusByCommunity?.[c.id]}
+                      />
+                    </Link>
+                  </td>
+                ) : null}
               </tr>
             );
           })}

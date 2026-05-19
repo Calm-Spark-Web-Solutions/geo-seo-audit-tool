@@ -38,6 +38,21 @@ export function normalizeUrl(input: string, base?: string): string | null {
   return url.toString();
 }
 
+/**
+ * WordPress and similar CMSes often 301 bare paths to a trailing slash. Request
+ * the slash up front so redirect-heavy fetches stay within the timeout budget.
+ */
+export function preferTrailingSlashFetchUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.pathname === "/" || u.pathname.endsWith("/")) return url;
+    u.pathname = `${u.pathname}/`;
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function isAssetUrl(url: string): boolean {
   try {
     const { pathname } = new URL(url);

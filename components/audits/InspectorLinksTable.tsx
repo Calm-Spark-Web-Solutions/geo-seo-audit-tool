@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import type { AuditCheckEvidenceItem } from "@/types";
 
 type LinkItem = Extract<AuditCheckEvidenceItem, { type: "link" }>;
@@ -21,7 +22,17 @@ function compare(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: "base" });
 }
 
-export function InspectorLinksTable({ items }: { items: LinkItem[] }) {
+export function InspectorLinksTable({
+  items,
+  title = "All sampled links",
+  description = "Search by URL or anchor text. Click a column header to sort.",
+  className,
+}: {
+  items: LinkItem[];
+  title?: string;
+  description?: string;
+  className?: string;
+}) {
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("url");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -55,12 +66,10 @@ export function InspectorLinksTable({ items }: { items: LinkItem[] }) {
   }
 
   return (
-    <Card>
+    <Card className={cn(className)}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">All sampled links</CardTitle>
-        <CardDescription>
-          Search by URL or anchor text. Click a column header to sort.
-        </CardDescription>
+        <CardTitle className="text-base">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <div className="relative">
