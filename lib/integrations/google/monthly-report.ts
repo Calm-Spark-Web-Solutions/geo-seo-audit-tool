@@ -211,6 +211,7 @@ export async function runMonthlyGoogleReportForAllCompanies(
     }
 
     const html = buildMonthlyGoogleReportHtml({
+      companyId,
       companyName,
       reportMonthLabel,
       siteUrl,

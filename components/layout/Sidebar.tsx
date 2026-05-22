@@ -4,6 +4,7 @@ import { SidebarContent } from "@/components/layout/SidebarContent";
 import { useSidebarCollapsed } from "@/components/layout/SidebarCollapseContext";
 import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import type { DashboardAccount } from "@/lib/layout/dashboard-account";
+import type { SidebarNavHrefs } from "@/lib/layout/sidebar-nav-hrefs";
 import { cn } from "@/lib/utils";
 import type { Company } from "@/types";
 
@@ -12,11 +13,13 @@ export function Sidebar({
   account,
   quota,
   activeOrganizationIdCookie,
+  navHrefs,
 }: {
   companies: Company[];
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
   activeOrganizationIdCookie: string | null;
+  navHrefs: SidebarNavHrefs;
 }) {
   const { collapsed, hydrated } = useSidebarCollapsed();
 
@@ -35,6 +38,7 @@ export function Sidebar({
         account={account}
         quota={quota}
         activeOrganizationIdCookie={activeOrganizationIdCookie}
+        navHrefs={navHrefs}
         variant="desktop"
       />
     </aside>

@@ -17,6 +17,7 @@ import type {
   AuditPage,
   AuditQueueDiagnostics,
   Community,
+  CommunityGoogleMetricsSnapshot,
   CommunityManualResults,
 } from "@/types";
 
@@ -102,7 +103,11 @@ export default async function AuditReportPage({
       }
     : null;
 
-  const [{ data: community }, { data: priorAudit }] = await Promise.all([
+  const [
+    { data: community },
+    { data: priorAudit },
+    { data: googleSnapshotRow },
+  ] = await Promise.all([
     supabase
       .from("communities")
       .select("id, name, company_id, facility_type, manual_check_results")
@@ -117,7 +122,22 @@ export default async function AuditReportPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Pull the daily Google snapshot synced when this scan completed (if any).
+    // Falls back to the most recent snapshot for this community when the
+    // audit-tied row is missing — covers reruns and back-fills.
+    supabase
+      .from("community_google_metrics_snapshots")
+      .select(
+        "community_id, snapshot_date, gsc_clicks_28d, gsc_impressions_28d, ga4_sessions_28d, ga4_active_users_28d, gsc_top_queries, gsc_top_pages, ga4_ai_referrals, source, audit_id",
+      )
+      .eq("community_id", typedAudit.community_id)
+      .order("snapshot_date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
+
+  const googleSnapshot =
+    (googleSnapshotRow as CommunityGoogleMetricsSnapshot | null) ?? null;
 
   type CommunityRow = Community & {
     manual_check_results: CommunityManualResults | null;
@@ -193,6 +213,7 @@ export default async function AuditReportPage({
         initialPages={typedPages}
         priorByUrl={priorByUrl}
         initialQueue={initialQueue}
+        googleSnapshot={googleSnapshot}
       />
 
       {typedCommunity ? (

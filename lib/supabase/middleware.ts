@@ -7,12 +7,19 @@ const PROTECTED_PREFIXES = [
   "/communities",
   "/visibility-scans",
   "/settings",
+  "/usage",
+  "/integrations",
   "/onboarding",
   "/api/visibility-scans",
   "/api/companies",
 ] as const;
 
-const AUTH_PATHS = new Set(["/login", "/signup"]);
+const AUTH_PATHS = new Set([
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+]);
 
 function isProtected(path: string): boolean {
   // Server-to-server runner endpoints authenticate themselves via shared-secret
@@ -76,6 +83,17 @@ export async function updateSession(request: NextRequest) {
   }
 
   if (user && authRoute) {
+    // /reset-password is reached as a signed-in user (Supabase grants a
+    // temporary recovery session); always let them through to update their
+    // password. /forgot-password and the invite-return /login flows are
+    // also allowed because they're explicit user choices, not stale links.
+    if (path === "/reset-password" || path === "/forgot-password") {
+      return supabaseResponse;
+    }
+    const nextParam = request.nextUrl.searchParams.get("next");
+    if (nextParam && nextParam.startsWith("/invite/")) {
+      return supabaseResponse;
+    }
     const dest = new URL("/dashboard", request.url);
     return NextResponse.redirect(dest);
   }

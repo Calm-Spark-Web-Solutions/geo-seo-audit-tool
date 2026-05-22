@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, usePathname } from "next/navigation";
-import { Suspense } from "react";
+import { usePathname } from "next/navigation";
 import { LayoutDashboard, PanelLeft, PanelLeftClose } from "lucide-react";
 
 import { CompanySwitcher } from "@/components/companies/CompanySwitcher";
 import { Brand } from "@/components/layout/Brand";
-import { selectedOrganizationId } from "@/lib/active-company";
 import { SidebarAccountSection } from "@/components/layout/SidebarAccountSection";
 import { SidebarAdminLinks } from "@/components/layout/SidebarAdminLinks";
 import { SidebarCompaniesList } from "@/components/layout/SidebarCompaniesList";
@@ -15,6 +13,7 @@ import { useSidebarCollapsed } from "@/components/layout/SidebarCollapseContext"
 import { Button } from "@/components/ui/button";
 import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import type { DashboardAccount } from "@/lib/layout/dashboard-account";
+import type { SidebarNavHrefs } from "@/lib/layout/sidebar-nav-hrefs";
 import { cn } from "@/lib/utils";
 import type { Company } from "@/types";
 
@@ -23,6 +22,7 @@ export function SidebarContent({
   account,
   quota,
   activeOrganizationIdCookie,
+  navHrefs,
   onNavigate,
   variant = "desktop",
 }: {
@@ -30,26 +30,18 @@ export function SidebarContent({
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
   activeOrganizationIdCookie: string | null;
+  /** From server layout — stable across SSR and hydration. */
+  navHrefs: SidebarNavHrefs;
   onNavigate?: () => void;
   variant?: "desktop" | "mobile";
 }) {
   const pathname = usePathname();
-  const params = useParams<{ id?: string | string[] }>();
   const { collapsed, toggleCollapsed } = useSidebarCollapsed();
   const isMobile = variant === "mobile";
   const railCollapsed = !isMobile && collapsed;
 
-  // Embed the currently-selected org in the Dashboard link so the page always
-  // knows which org to scope to — no cookie ambiguity.
-  const activeOrgId = selectedOrganizationId(
-    companies,
-    params,
-    pathname,
-    activeOrganizationIdCookie,
-  );
-  const dashboardHref = activeOrgId
-    ? `/dashboard?org=${activeOrgId}`
-    : "/dashboard";
+  const { dashboard: dashboardHref, usage: usageHref, google: googleHref } =
+    navHrefs;
   const dashboardActive =
     pathname === "/dashboard" || pathname.startsWith("/dashboard?");
 
@@ -91,7 +83,7 @@ export function SidebarContent({
           onNavigate={onNavigate}
         />
 
-        <nav aria-label="Primary">
+        <nav aria-label="Primary" className="flex flex-col gap-0.5">
           <Link
             href={dashboardHref}
             onClick={onNavigate}
@@ -126,19 +118,12 @@ export function SidebarContent({
       </div>
 
       <div className="mt-3 shrink-0 space-y-0 border-t border-border pt-4">
-        <Suspense
-          fallback={
-            <div
-              className="h-[7.5rem] animate-pulse rounded-md bg-muted/40"
-              aria-hidden
-            />
-          }
-        >
-          <SidebarAdminLinks
-            collapsed={railCollapsed}
-            onNavigate={onNavigate}
-          />
-        </Suspense>
+        <SidebarAdminLinks
+          usageHref={usageHref}
+          googleHref={googleHref}
+          collapsed={railCollapsed}
+          onNavigate={onNavigate}
+        />
         {account ? (
           <SidebarAccountSection
             quota={quota}
@@ -146,6 +131,7 @@ export function SidebarContent({
             fullName={account.fullName}
             avatarUrl={account.avatarUrl}
             collapsed={railCollapsed}
+            usageHref={usageHref}
           />
         ) : null}
       </div>

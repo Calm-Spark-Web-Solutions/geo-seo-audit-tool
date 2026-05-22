@@ -29,7 +29,7 @@ export async function GET(request: Request) {
   if (!stateRaw) {
     return redirectToPath(
       request,
-      "/settings?tab=organizations&google=error&reason=invalid_state",
+      "/integrations/google?google=error&reason=invalid_state",
     );
   }
 

@@ -12,6 +12,7 @@ export interface MonthlyReportCommunityRow {
 }
 
 export interface MonthlyGoogleReportInput {
+  companyId: string;
   companyName: string;
   reportMonthLabel: string;
   siteUrl: string;
@@ -111,7 +112,7 @@ export function buildMonthlyGoogleReportHtml(
     </tbody>
   </table>
   <p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">
-    <a href="${escapeHtml(base)}/settings" style="color:#6b7280;">Manage Google connection</a>
+    <a href="${escapeHtml(base)}/integrations/google?org=${encodeURIComponent(input.companyId)}" style="color:#6b7280;">Manage Google connection</a>
   </p>
 </body>
 </html>`;

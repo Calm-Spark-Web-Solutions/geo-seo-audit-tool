@@ -141,9 +141,8 @@ export default async function NewAuditPage({
         title="Run new visibility scan"
         description={
           <span className="text-muted-foreground">
-            Pick which sitemap categories and URLs to include. Each page is
-            scored with deterministic checks plus PSI, so larger runs take
-            proportionally longer.
+            We&apos;ve picked the most important pages from this site. Hit
+            Start, or open Advanced to fine-tune which pages we include.
           </span>
         }
       />

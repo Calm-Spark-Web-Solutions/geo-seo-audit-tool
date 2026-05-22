@@ -26,6 +26,7 @@ describe("dedupeReportRecipients", () => {
 describe("buildMonthlyGoogleReportHtml", () => {
   it("includes community metrics and scan note", () => {
     const html = buildMonthlyGoogleReportHtml({
+      companyId: "co-1",
       companyName: "YoloCare",
       reportMonthLabel: "May 2026",
       siteUrl: "https://app.example.com",
@@ -48,6 +49,7 @@ describe("buildMonthlyGoogleReportHtml", () => {
     expect(html).toContain("10");
     expect(html).toContain("Monthly visibility scan queued");
     expect(html).toContain("/communities/c1");
+    expect(html).toContain("/integrations/google?org=co-1");
   });
 });
 

@@ -104,7 +104,7 @@ export default async function EditCommunityPage({
                   (googleProps?.ga4_property_id as string | null) ?? null
                 }
                 googleConnected={Boolean(googleConn)}
-                companyHubHref={`/companies/${companyId}#google-integrations`}
+                companyHubHref={`/integrations/google?org=${companyId}`}
               />
             </CardContent>
           </Card>

@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink, Gauge, Loader2 } from "lucide-react";
+import { ExternalLink, Gauge, LineChart, Loader2 } from "lucide-react";
 
 import { DeleteAuditButton } from "@/components/audits/DeleteAuditButton";
 import { RerunVisibilityScanButton } from "@/components/audits/RerunVisibilityScanButton";
 import { StatusBadge } from "@/components/audits/StatusBadge";
 import { AuditTrend } from "@/components/communities/AuditTrend";
-import { GoogleMetricsCard } from "@/components/communities/GoogleMetricsCard";
-import { RefreshGoogleMetricsButton } from "@/components/communities/RefreshGoogleMetricsButton";
 import { CommunityManualChecklist } from "@/components/communities/CommunityManualChecklist";
 import { DeleteCommunityButton } from "@/components/communities/DeleteCommunityButton";
 import { EmptyState } from "@/components/layout/EmptyState";
@@ -43,7 +41,6 @@ export default async function CommunityDetailPage({
     { data: community, error },
     { data: audits },
     { data: metricsRows },
-    { data: googleProps },
   ] = await Promise.all([
     supabase
       .from("communities")
@@ -60,6 +57,9 @@ export default async function CommunityDetailPage({
       .eq("community_id", id)
       .order("created_at", { ascending: false })
       .limit(20),
+    // AuditTrend overlays GSC clicks / GA4 sessions on the score timeline, so
+    // we still pull recent snapshots here even though the standalone Google
+    // cards now live on /communities/[id]/traffic.
     supabase
       .from("community_google_metrics_snapshots")
       .select(
@@ -68,11 +68,6 @@ export default async function CommunityDetailPage({
       .eq("community_id", id)
       .order("snapshot_date", { ascending: false })
       .limit(60),
-    supabase
-      .from("community_google_properties")
-      .select("gsc_site_url, ga4_property_id")
-      .eq("community_id", id)
-      .maybeSingle(),
   ]);
 
   if (error) {
@@ -97,12 +92,6 @@ export default async function CommunityDetailPage({
   const typedAudits = (audits ?? []) as Audit[];
   const metricsSnapshots = (metricsRows ??
     []) as CommunityGoogleMetricsSnapshot[];
-  const latestMetrics = metricsSnapshots[0] ?? null;
-  const googleMapped = {
-    gsc: Boolean(googleProps?.gsc_site_url?.trim()),
-    ga4: Boolean(googleProps?.ga4_property_id?.trim()),
-  };
-  const showGoogleMetrics = googleMapped.gsc || googleMapped.ga4;
   const manualResults =
     (typedCommunity.manual_check_results as CommunityManualResults | null) ??
     null;
@@ -145,6 +134,12 @@ export default async function CommunityDetailPage({
               </Link>
             </Button>
             <Button variant="outline" asChild>
+              <Link href={`/communities/${typedCommunity.id}/traffic`}>
+                <LineChart className="h-4 w-4" aria-hidden />
+                Google traffic
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
               <Link href={`/communities/${typedCommunity.id}/edit`}>Edit</Link>
             </Button>
             <DeleteCommunityButton
@@ -154,16 +149,6 @@ export default async function CommunityDetailPage({
           </>
         }
       />
-
-      {showGoogleMetrics ? (
-        <div className="flex flex-col gap-3">
-          <GoogleMetricsCard
-            metrics={latestMetrics}
-            mapped={googleMapped}
-          />
-          <RefreshGoogleMetricsButton communityId={id} />
-        </div>
-      ) : null}
 
       <AuditTrend audits={typedAudits} metricsSnapshots={metricsSnapshots} />
 

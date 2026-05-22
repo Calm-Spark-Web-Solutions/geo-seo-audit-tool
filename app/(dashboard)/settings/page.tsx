@@ -1,12 +1,14 @@
 import { redirect } from "next/navigation";
 
 import { BillingAlert } from "@/components/billing/BillingAlert";
-import { BillingUsageCard } from "@/components/billing/BillingUsageCard";
+import { BillingUsageSummaryTeaser } from "@/components/billing/BillingUsageSummaryTeaser";
 import { PricingCards } from "@/components/billing/PricingCards";
 import { ProfileSettingsSection } from "@/components/settings/ProfileSettingsSection";
-import { GoogleIntegrationsLoader } from "@/components/settings/GoogleIntegrationsLoader";
 import { SettingsOrganizationsSection } from "@/components/settings/SettingsOrganizationsSection";
+import { SettingsTabs } from "@/components/settings/SettingsTabs";
 import { SettingsTeamInviteSection } from "@/components/teams/SettingsTeamInviteSection";
+import { getActiveOrgCookie } from "@/lib/active-org-cookie";
+import { resolveDashboardOrgId } from "@/lib/layout/resolve-dashboard-org";
 import { PageHeader } from "@/components/layout/PageHeader";
 import {
   Card,
@@ -27,6 +29,7 @@ import {
   resolvePlanLimits,
   monthlyVolumeDiscountedSubtotal,
   TRIAL_PLAN_LIMITS,
+  trialWindowFromPlanLimits,
 } from "@/lib/billing/plan-limits";
 import { loadBillingUsageSnapshot } from "@/lib/billing/usage-snapshot";
 import { createClient } from "@/lib/supabase/server";
@@ -59,20 +62,8 @@ export default async function SettingsPage({
         ? tabRaw[0]
         : undefined;
 
-  const googleRaw = sp.google;
-  const googleFlash =
-    typeof googleRaw === "string"
-      ? googleRaw
-      : Array.isArray(googleRaw)
-        ? googleRaw[0]
-        : undefined;
-  const reasonRaw = sp.reason;
-  const googleReason =
-    typeof reasonRaw === "string"
-      ? reasonRaw
-      : Array.isArray(reasonRaw)
-        ? reasonRaw[0]
-        : undefined;
+  // Google OAuth always returns to `/integrations/google?…` now, so no
+  // forwarder is needed on this page.
   const activeTab: SettingsTab =
     tabParam === "profile"
       ? "profile"
@@ -103,7 +94,26 @@ export default async function SettingsPage({
 
   const subscription = subRow as Subscription | null;
   const stripeConfigured = isStripeConfigured();
-  const usageSnapshot = await loadBillingUsageSnapshot(supabase, user.id);
+
+  const [{ data: companyRows }, cookieOrgId] = await Promise.all([
+    supabase.from("companies").select("id, name").order("name", { ascending: true }),
+    getActiveOrgCookie(),
+  ]);
+  const companyList = (companyRows ?? []) as { id: string; name: string }[];
+  const usageOrgId = resolveDashboardOrgId(companyList, null, cookieOrgId);
+  const usageOrg = usageOrgId
+    ? companyList.find((c) => c.id === usageOrgId)
+    : undefined;
+  const usageSnapshot =
+    usageOrgId && usageOrg
+      ? await loadBillingUsageSnapshot(supabase, user.id, {
+          companyId: usageOrgId,
+          companyName: usageOrg.name,
+        })
+      : null;
+  const usageHref = usageOrgId
+    ? `/usage?org=${encodeURIComponent(usageOrgId)}`
+    : "/usage";
 
   // Compute the per-community unit price + total for the "Current plan" card
   // so the customer sees exactly what they're paying for. Falls back to a
@@ -155,6 +165,18 @@ export default async function SettingsPage({
   const runsPackTotal =
     runsPacksPerCommunity * communityCount * runsPackUnitPrice;
 
+  const trialWindow =
+    subscription?.status === "trialing"
+      ? trialWindowFromPlanLimits(subscription?.plan_limits ?? null)
+      : null;
+  const trialEndLabel = trialWindow
+    ? new Date(trialWindow.end).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
   const cycleSuffix = planCycle === "yearly" ? "/yr" : "/mo";
   const tierDiscounted =
     planTier && unitPrice !== null
@@ -188,6 +210,8 @@ export default async function SettingsPage({
         }
       />
 
+      <SettingsTabs active={activeTab} />
+
       <div className="min-w-0 space-y-8">
         {activeTab === "profile" ? (
           <ProfileSettingsSection
@@ -205,20 +229,9 @@ export default async function SettingsPage({
                 <CardHeader>
                   <CardTitle className="text-base">Current plan</CardTitle>
                   <CardDescription>
-                    Subscription is tracked per login. With Stripe configured,
-                    starting visibility scans requires{" "}
-                    <strong className="font-medium text-foreground">
-                      Active
-                    </strong>{" "}
-                    or{" "}
-                    <strong className="font-medium text-foreground">
-                      Trialing
-                    </strong>{" "}
-                    status. PDF downloads require{" "}
-                    <strong className="font-medium text-foreground">
-                      Active
-                    </strong>{" "}
-                    (trial includes capped scans only).
+                    {trialEndLabel
+                      ? `You're on a 14-day free trial. We'll charge your card on ${trialEndLabel} unless you cancel from Manage subscription.`
+                      : "Visibility scans need an Active or Trialing subscription. PDF downloads are unlocked once your trial converts."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-1 text-sm">
@@ -234,6 +247,12 @@ export default async function SettingsPage({
                       {formatSubscriptionStatus(subscription?.status)}
                     </span>
                   </p>
+                  {trialEndLabel ? (
+                    <p>
+                      <span className="text-muted-foreground">Trial ends: </span>
+                      <span className="font-medium">{trialEndLabel}</span>
+                    </p>
+                  ) : null}
                   {tierTotalLine ? (
                     <p>
                       <span className="text-muted-foreground">Tier: </span>
@@ -268,7 +287,12 @@ export default async function SettingsPage({
                 </CardContent>
               </Card>
 
-              <BillingUsageCard snapshot={usageSnapshot} />
+              {usageSnapshot ? (
+                <BillingUsageSummaryTeaser
+                  snapshot={usageSnapshot}
+                  usageHref={usageHref}
+                />
+              ) : null}
 
               <div className="space-y-3">
                 <h2 className="text-lg font-semibold tracking-tight">
@@ -292,10 +316,6 @@ export default async function SettingsPage({
             </div>
           ) : (
             <div id="organizations" className="space-y-6">
-              <GoogleIntegrationsLoader
-                googleFlash={googleFlash}
-                googleReason={googleReason}
-              />
               <SettingsOrganizationsSection />
             </div>
           )}

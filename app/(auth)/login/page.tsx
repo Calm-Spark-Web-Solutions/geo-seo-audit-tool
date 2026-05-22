@@ -27,11 +27,11 @@ export default async function LoginPage({
     >
       <ThemeToggleFixed />
       <Brand size="lg" />
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle>Sign in</CardTitle>
           <CardDescription>
-            Welcome back. Sign in to manage your audits.
+            Welcome back. Sign in to run visibility scans on your communities.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

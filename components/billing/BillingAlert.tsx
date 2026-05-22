@@ -34,7 +34,7 @@ const MESSAGES: Record<
   error: {
     tone: "bad",
     title: "Something went wrong",
-    body: "Stripe returned an error. Try again or check server logs.",
+    body: "We couldn't complete that change. Try again, and contact support if it keeps happening.",
   },
 };
 

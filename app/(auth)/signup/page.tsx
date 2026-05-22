@@ -26,7 +26,7 @@ export default async function SignupPage({
     >
       <ThemeToggleFixed />
       <Brand size="lg" />
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <CardTitle>Create your account</CardTitle>
           <CardDescription>

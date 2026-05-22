@@ -576,7 +576,7 @@ function TierCard({
                   e.stopPropagation();
                 }}
               >
-                Manage in Stripe
+                Manage subscription
               </Button>
             </form>
           ) : (
@@ -597,7 +597,7 @@ function TierCard({
                   e.stopPropagation();
                 }}
               >
-                Subscribe {cycle === "monthly" ? "monthly" : "yearly"}
+                Start 14-day free trial
               </Button>
             </form>
           )}
@@ -607,8 +607,9 @@ function TierCard({
         {billingBlocked
           ? "Checkout is temporarily unavailable. Please contact support."
           : hasLiveSubscription
-            ? "Change quantity, tier, or add-ons on your existing subscription \u2014 no duplicate charges."
-            : null}
+            ? "Update communities, tier, or add-ons anytime \u2014 no duplicate charges."
+            : "14 days free, then " +
+              `${formatUsd(unitPrice)}${unitSuffix} per community. Cancel anytime.`}
       </CardFooter>
     </Card>
   );

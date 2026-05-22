@@ -7,6 +7,7 @@ import { Topbar } from "@/components/layout/Topbar";
 import { getActiveOrgCookie } from "@/lib/active-org-cookie";
 import { getAuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import type { DashboardAccount } from "@/lib/layout/dashboard-account";
+import { buildSidebarNavHrefs } from "@/lib/layout/sidebar-nav-hrefs";
 import { createClient } from "@/lib/supabase/server";
 import type { Company } from "@/types";
 
@@ -23,13 +24,14 @@ export default async function DashboardLayout({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Run all three independent queries in parallel — previously they were
-  // sequential (memberCount → companies → loadDashboardAccount which called
-  // getUser() a second time). This shaves ~100–300 ms off every page load.
+  // Run independent queries in parallel — quota resolution waits for the
+  // active org so the sidebar meter scopes its "used" count to the same
+  // organization the /usage page shows. Without this, the sidebar reported
+  // account-wide usage while /usage was org-scoped — two different numbers
+  // for the same user.
   const [
     { count: memberCount },
     { data, error },
-    quota,
     activeOrganizationIdCookie,
   ] = await Promise.all([
     supabase
@@ -40,7 +42,6 @@ export default async function DashboardLayout({
       .from("companies")
       .select("id, user_id, name, logo_url, contact_name, contact_email, created_at")
       .order("name", { ascending: true }),
-    getAuditQuotaSnapshot(supabase, user.id),
     getActiveOrgCookie(),
   ]);
 
@@ -61,6 +62,12 @@ export default async function DashboardLayout({
     avatarUrl: meta.avatar_url ?? null,
   };
 
+  const navHrefs = buildSidebarNavHrefs(companies, activeOrganizationIdCookie);
+
+  const quota = await getAuditQuotaSnapshot(supabase, user.id, {
+    companyId: navHrefs.orgId ?? undefined,
+  });
+
   return (
     <SidebarCollapseProvider>
       <div className="flex min-h-screen flex-col bg-background">
@@ -69,12 +76,14 @@ export default async function DashboardLayout({
           account={account}
           quota={quota}
           activeOrganizationIdCookie={activeOrganizationIdCookie}
+          navHrefs={navHrefs}
         />
         <DashboardBody
           companies={companies}
           account={account}
           quota={quota}
           activeOrganizationIdCookie={activeOrganizationIdCookie}
+          navHrefs={navHrefs}
         >
           {children}
         </DashboardBody>

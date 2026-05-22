@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { loadCommunityIdsForCompany } from "@/lib/billing/billing-context";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import {
   TRIAL_PLAN_LIMITS,
@@ -21,6 +22,11 @@ export type AuditQuotaSnapshot =
       /** Month label for the UTC window used in usage queries, e.g. "May 2026 (UTC)". */
       periodLabel: string;
     };
+
+export type AuditQuotaOptions = {
+  /** When set, `used` counts only audits in this organization's communities. */
+  companyId?: string;
+};
 
 /**
  * Calendar month in UTC — same window for `periodLabel` and the audits count query.
@@ -47,16 +53,65 @@ function utcMonthWindow(now = new Date()): {
   };
 }
 
+async function resolveCommunityIdsForQuota(
+  supabase: SupabaseClient,
+  userId: string,
+  companyId?: string,
+): Promise<string[]> {
+  if (companyId) {
+    return loadCommunityIdsForCompany(supabase, companyId);
+  }
+
+  const { data: memberships } = await supabase
+    .from("company_members")
+    .select("company_id")
+    .eq("user_id", userId);
+
+  const companyIds = [...new Set((memberships ?? []).map((m) => m.company_id as string))];
+  if (companyIds.length === 0) return [];
+
+  const { data: communities } = await supabase
+    .from("communities")
+    .select("id")
+    .in("company_id", companyIds);
+
+  return (communities ?? []).map((c) => c.id as string);
+}
+
+async function countManualQuotaAudits(
+  supabase: SupabaseClient,
+  communityIds: string[],
+  start: string,
+  end: string,
+): Promise<number> {
+  if (communityIds.length === 0) return 0;
+
+  const { count, error } = await supabase
+    .from("audits")
+    .select("id", { count: "exact", head: true })
+    .in("community_id", communityIds)
+    .eq("consumes_manual_quota", true)
+    .gte("created_at", start)
+    .lt("created_at", end);
+
+  if (error) {
+    console.warn("[audit-quota] count failed:", error.message);
+    return 0;
+  }
+
+  return count ?? 0;
+}
+
 /**
- * Returns how many audits the user's organizations started in the **UTC**
- * calendar month vs the cap from their subscription plan. When Stripe is off
- * or subscription bypass is on, returns `unlimited` for display (enforcement
- * in startAudit matches).
+ * Returns how many audits started in the billing window vs the account cap.
+ * When `companyId` is set, `used` is scoped to that org; `limit` stays account-wide.
  */
 export async function getAuditQuotaSnapshot(
   supabase: SupabaseClient,
   userId: string,
+  options?: AuditQuotaOptions,
 ): Promise<AuditQuotaSnapshot> {
+  const companyId = options?.companyId;
   const stripeOn = isStripeConfigured();
 
   const { data: subRow } = await supabase
@@ -82,58 +137,18 @@ export async function getAuditQuotaSnapshot(
       ? { start: tw.start, end: tw.end, periodLabel: "Trial period (UTC)" }
       : utcMonthWindow();
 
-    const { data: memberships } = await supabase
-      .from("company_members")
-      .select("company_id")
-      .eq("user_id", userId);
+    const communityIds = await resolveCommunityIdsForQuota(
+      supabase,
+      userId,
+      companyId,
+    );
+    const used = await countManualQuotaAudits(
+      supabase,
+      communityIds,
+      start,
+      end,
+    );
 
-    const companyIds = [...new Set((memberships ?? []).map((m) => m.company_id))];
-    if (companyIds.length === 0) {
-      return {
-        kind: "limited",
-        used: 0,
-        limit,
-        remaining: limit,
-        periodLabel,
-      };
-    }
-
-    const { data: communities } = await supabase
-      .from("communities")
-      .select("id")
-      .in("company_id", companyIds);
-
-    const communityIds = (communities ?? []).map((c) => c.id as string);
-    if (communityIds.length === 0) {
-      return {
-        kind: "limited",
-        used: 0,
-        limit,
-        remaining: limit,
-        periodLabel,
-      };
-    }
-
-    const { count, error } = await supabase
-      .from("audits")
-      .select("id", { count: "exact", head: true })
-      .in("community_id", communityIds)
-      .eq("consumes_manual_quota", true)
-      .gte("created_at", start)
-      .lt("created_at", end);
-
-    if (error) {
-      console.warn("[audit-quota] trialing count failed:", error.message);
-      return {
-        kind: "limited",
-        used: 0,
-        limit,
-        remaining: limit,
-        periodLabel,
-      };
-    }
-
-    const used = count ?? 0;
     return {
       kind: "limited",
       used,
@@ -147,74 +162,29 @@ export async function getAuditQuotaSnapshot(
     subRow?.plan ?? null,
     subRow?.plan_limits ?? null,
   );
-  // Scale the per-community audit-start budget by the customer's purchased
-  // community quantity (stored on `plan_limits.communities` by the webhook).
-  // Caller fits into "unlimited" when the per-community budget is `null`.
   const limit = effectiveMonthlyScans(planLimits, planLimits.communities);
   if (limit === null || limit <= 0) {
     return { kind: "unlimited" };
   }
+
   const { start, end, periodLabel } = utcMonthWindow();
-
-  const { data: memberships } = await supabase
-    .from("company_members")
-    .select("company_id")
-    .eq("user_id", userId);
-
-  const companyIds = [...new Set((memberships ?? []).map((m) => m.company_id))];
-  if (companyIds.length === 0) {
-    return {
-      kind: "limited",
-      used: 0,
-      limit,
-      remaining: limit,
-      periodLabel,
-    };
-  }
-
-  const { data: communities } = await supabase
-    .from("communities")
-    .select("id")
-    .in("company_id", companyIds);
-
-  const communityIds = (communities ?? []).map((c) => c.id as string);
-  if (communityIds.length === 0) {
-    return {
-      kind: "limited",
-      used: 0,
-      limit,
-      remaining: limit,
-      periodLabel,
-    };
-  }
-
-  const { count, error } = await supabase
-    .from("audits")
-    .select("id", { count: "exact", head: true })
-    .in("community_id", communityIds)
-    .eq("consumes_manual_quota", true)
-    .gte("created_at", start)
-    .lt("created_at", end);
-
-  if (error) {
-    console.warn("[audit-quota] count failed:", error.message);
-    return {
-      kind: "limited",
-      used: 0,
-      limit,
-      remaining: limit,
-      periodLabel,
-    };
-  }
-
-  const used = count ?? 0;
-  const remaining = Math.max(0, limit - used);
+  const communityIds = await resolveCommunityIdsForQuota(
+    supabase,
+    userId,
+    companyId,
+  );
+  const used = await countManualQuotaAudits(
+    supabase,
+    communityIds,
+    start,
+    end,
+  );
 
   return {
     kind: "limited",
     used,
     limit,
-    remaining,
+    remaining: Math.max(0, limit - used),
     periodLabel,
   };
 }

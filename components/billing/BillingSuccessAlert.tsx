@@ -38,9 +38,8 @@ export function BillingSuccessAlert({ stripeSubId }: Props) {
 
   if (succeeded) {
     return (
-      <Banner tone="ok" Icon={CheckCircle2} title="Subscription updated">
-        Your plan, community count, and Page Pack allowance are now in sync
-        with Stripe.
+      <Banner tone="ok" Icon={CheckCircle2} title="You're all set">
+        Your subscription is active and your plan limits are up to date.
       </Banner>
     );
   }
@@ -50,32 +49,20 @@ export function BillingSuccessAlert({ stripeSubId }: Props) {
       <Banner
         tone="warn"
         Icon={AlertCircle}
-        title="Stripe accepted your payment, but we haven\u2019t received the webhook yet"
+        title="Payment received — still finalizing"
       >
-        Charges went through on Stripe&rsquo;s side. The plan card below may
-        still show your previous limits until the{" "}
-        <code className="rounded bg-muted px-1 py-0.5 text-xs">
-          customer.subscription.created
-        </code>{" "}
-        event reaches{" "}
-        <code className="rounded bg-muted px-1 py-0.5 text-xs">
-          /api/stripe/webhook
-        </code>
-        . In local dev, make sure{" "}
-        <code className="rounded bg-muted px-1 py-0.5 text-xs">
-          stripe listen --forward-to localhost:3000/api/stripe/webhook
-        </code>{" "}
-        is running and its <code className="rounded bg-muted px-1 py-0.5 text-xs">whsec_*</code>{" "}
-        matches your <code className="rounded bg-muted px-1 py-0.5 text-xs">STRIPE_WEBHOOK_SECRET</code>.
-        You can replay the event from Stripe Dashboard &rarr; Developers &rarr; Events.
+        Your payment went through, but we&rsquo;re still finalizing your plan
+        on our side. The card below may show your previous limits for another
+        minute or two. Refresh this page in a bit, or contact support if it
+        doesn&rsquo;t update.
       </Banner>
     );
   }
 
   return (
-    <Banner tone="ok" Icon={Loader2} iconSpin title="Confirming with Stripe">
-      Your payment went through. Waiting for the subscription webhook to land
-      so the plan card and usage meters update&hellip;
+    <Banner tone="ok" Icon={Loader2} iconSpin title="Finalizing your subscription">
+      Hang on — we&rsquo;re finalizing your plan. Your usage meters will
+      update in a moment.
     </Banner>
   );
 }

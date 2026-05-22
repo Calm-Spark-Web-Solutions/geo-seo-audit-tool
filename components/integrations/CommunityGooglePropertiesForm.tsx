@@ -121,14 +121,14 @@ export function CommunityGooglePropertiesForm({
   if (!googleConnected) {
     return (
       <p className="text-sm text-muted-foreground">
-        Connect Google for this organization in{" "}
+        Connect Google for this organization on the{" "}
         <Link
-          href="/settings?tab=organizations"
+          href={`/integrations/google?org=${encodeURIComponent(companyId)}`}
           className="font-medium text-foreground underline underline-offset-4"
         >
-          Settings → Organizations
+          Google setup
         </Link>{" "}
-        to map Search Console and GA4 properties.
+        page to map Search Console and Analytics properties.
       </p>
     );
   }

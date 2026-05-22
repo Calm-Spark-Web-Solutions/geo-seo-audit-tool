@@ -5,6 +5,7 @@ import {
   friendlyGa4ApiError,
   friendlyGscApiError,
 } from "@/lib/integrations/google/google-properties-ui";
+import type { GaAiReferral, GscPageRow, GscQueryRow } from "@/types";
 
 import {
   getCompanyIdForCommunity,
@@ -12,13 +13,29 @@ import {
   loadCommunityGoogleProperties,
 } from "./connection";
 import type { GoogleMetricsSnapshot } from "./field-checks";
-import { fetchGsc28DayTotals } from "./gsc";
-import { fetchGa4_28DayTotals } from "./ga4";
+import { fetchGsc28DayBreakdowns, fetchGsc28DayTotals } from "./gsc";
+import { fetchGa4_28DayTotals, fetchGa4AiReferrals } from "./ga4";
 
 export type MetricsSnapshotSource = "audit" | "daily_sync";
 
+/**
+ * Per-snapshot detail rows persisted as JSONB on
+ * `community_google_metrics_snapshots`. Fields are optional individually so
+ * we never block the row upsert when one Google API fails.
+ */
+export interface GoogleMetricsDetails {
+  gsc_top_queries?: GscQueryRow[];
+  gsc_top_pages?: GscPageRow[];
+  ga4_ai_referrals?: GaAiReferral[];
+}
+
 export type GoogleMetricsSyncResult =
-  | { ok: true; metrics: GoogleMetricsSnapshot; warnings: string[] }
+  | {
+      ok: true;
+      metrics: GoogleMetricsSnapshot;
+      details: GoogleMetricsDetails;
+      warnings: string[];
+    }
   | { ok: false; error: string };
 
 export async function fetchGoogleMetricsForCommunity(
@@ -57,32 +74,79 @@ export async function fetchGoogleMetricsForCommunity(
   };
 
   const warnings: string[] = [];
+  const details: GoogleMetricsDetails = {};
   let gscOk = !hasGsc;
   let ga4Ok = !hasGa4;
 
+  // GSC totals + dimensional breakdowns run in parallel against the same
+  // `searchAnalytics/query` endpoint. A breakdown failure does not invalidate
+  // the totals (and vice versa) — each is best-effort.
   if (hasGsc && props?.gsc_site_url) {
-    try {
-      const gsc = await fetchGsc28DayTotals(accessToken, props.gsc_site_url);
-      metrics.gsc_clicks_28d = gsc.clicks;
-      metrics.gsc_impressions_28d = gsc.impressions;
+    const siteUrl = props.gsc_site_url;
+    const [totalsResult, breakdownsResult] = await Promise.allSettled([
+      fetchGsc28DayTotals(accessToken, siteUrl),
+      fetchGsc28DayBreakdowns(accessToken, siteUrl),
+    ]);
+
+    if (totalsResult.status === "fulfilled") {
+      metrics.gsc_clicks_28d = totalsResult.value.clicks;
+      metrics.gsc_impressions_28d = totalsResult.value.impressions;
       gscOk = true;
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
+    } else {
+      const raw =
+        totalsResult.reason instanceof Error
+          ? totalsResult.reason.message
+          : String(totalsResult.reason);
       observabilityLog.warn("google.metrics_gsc_failed", { communityId, error: raw });
       warnings.push(`Search Console: ${friendlyGscApiError(raw)}`);
+    }
+
+    if (breakdownsResult.status === "fulfilled") {
+      details.gsc_top_queries = breakdownsResult.value.topQueries;
+      details.gsc_top_pages = breakdownsResult.value.topPages;
+    } else {
+      const raw =
+        breakdownsResult.reason instanceof Error
+          ? breakdownsResult.reason.message
+          : String(breakdownsResult.reason);
+      observabilityLog.warn("google.metrics_gsc_breakdowns_failed", {
+        communityId,
+        error: raw,
+      });
     }
   }
 
   if (hasGa4 && props?.ga4_property_id) {
-    try {
-      const ga4 = await fetchGa4_28DayTotals(accessToken, props.ga4_property_id);
-      metrics.ga4_sessions_28d = ga4.sessions;
-      metrics.ga4_active_users_28d = ga4.activeUsers;
+    const propertyId = props.ga4_property_id;
+    const [totalsResult, aiReferralsResult] = await Promise.allSettled([
+      fetchGa4_28DayTotals(accessToken, propertyId),
+      fetchGa4AiReferrals(accessToken, propertyId),
+    ]);
+
+    if (totalsResult.status === "fulfilled") {
+      metrics.ga4_sessions_28d = totalsResult.value.sessions;
+      metrics.ga4_active_users_28d = totalsResult.value.activeUsers;
       ga4Ok = true;
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
+    } else {
+      const raw =
+        totalsResult.reason instanceof Error
+          ? totalsResult.reason.message
+          : String(totalsResult.reason);
       observabilityLog.warn("google.metrics_ga4_failed", { communityId, error: raw });
       warnings.push(`Analytics: ${friendlyGa4ApiError(raw)}`);
+    }
+
+    if (aiReferralsResult.status === "fulfilled") {
+      details.ga4_ai_referrals = aiReferralsResult.value;
+    } else {
+      const raw =
+        aiReferralsResult.reason instanceof Error
+          ? aiReferralsResult.reason.message
+          : String(aiReferralsResult.reason);
+      observabilityLog.warn("google.metrics_ga4_ai_referrals_failed", {
+        communityId,
+        error: raw,
+      });
     }
   }
 
@@ -93,7 +157,7 @@ export async function fetchGoogleMetricsForCommunity(
     };
   }
 
-  return { ok: true, metrics, warnings };
+  return { ok: true, metrics, details, warnings };
 }
 
 function todayUtcDate(): string {
@@ -105,11 +169,13 @@ export async function upsertCommunityGoogleMetricsSnapshot(
   opts: {
     communityId: string;
     metrics: GoogleMetricsSnapshot;
+    details?: GoogleMetricsDetails;
     source: MetricsSnapshotSource;
     auditId?: string | null;
   },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const snapshotDate = todayUtcDate();
+  const details = opts.details ?? {};
   const { error } = await supabase.from("community_google_metrics_snapshots").upsert(
     {
       community_id: opts.communityId,
@@ -118,6 +184,9 @@ export async function upsertCommunityGoogleMetricsSnapshot(
       gsc_impressions_28d: opts.metrics.gsc_impressions_28d,
       ga4_sessions_28d: opts.metrics.ga4_sessions_28d,
       ga4_active_users_28d: opts.metrics.ga4_active_users_28d,
+      gsc_top_queries: details.gsc_top_queries ?? null,
+      gsc_top_pages: details.gsc_top_pages ?? null,
+      ga4_ai_referrals: details.ga4_ai_referrals ?? null,
       source: opts.source,
       audit_id: opts.auditId ?? null,
     },
@@ -145,6 +214,7 @@ export async function syncGoogleMetricsForCommunityDetailed(
   const upserted = await upsertCommunityGoogleMetricsSnapshot(supabase, {
     communityId,
     metrics: fetched.metrics,
+    details: fetched.details,
     source,
     auditId,
   });

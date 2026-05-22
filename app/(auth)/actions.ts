@@ -3,6 +3,8 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { z } from "zod";
+
 import { consumeRateLimit } from "@/lib/ratelimit";
 import { getClientIp } from "@/lib/security/client-ip";
 import { createClient } from "@/lib/supabase/server";
@@ -15,6 +17,8 @@ export type AuthFormState = {
   fieldErrors?: Partial<Record<"email" | "password", string>>;
   sent?: boolean;
   email?: string;
+  /** Recoverable hint to render after a successful password update. */
+  passwordUpdated?: boolean;
 };
 
 // Generic copy intentionally — never reveal whether the email exists,
@@ -110,8 +114,12 @@ export async function signIn(
 
   const next = safeNextPath(formData.get("next"));
   const count = await membershipCountForUser(data.user.id);
-  // If the user has memberships, honor `next` (e.g. /invite/<token>);
-  // otherwise force them through onboarding to create their first org.
+  // Always honor an invite-return `next` — a brand-new account with zero
+  // memberships should be allowed to *accept* the invite they were sent
+  // instead of being trapped in /onboarding to create their own org.
+  if (next && next.startsWith("/invite/")) {
+    redirect(next);
+  }
   if (count > 0) {
     redirect(next ?? "/dashboard");
   }
@@ -150,11 +158,20 @@ export async function signUp(
   }
 
   const origin = await getOrigin();
+  // Pass `next` through Supabase's email confirmation so a user who signs
+  // up from an invite link returns to that invite after clicking the
+  // confirmation email — not to a generic onboarding flow.
+  const nextForEmail = safeNextPath(formData.get("next"));
+  const callbackUrl = origin
+    ? nextForEmail
+      ? `${origin}/auth/callback?next=${encodeURIComponent(nextForEmail)}`
+      : `${origin}/auth/callback`
+    : undefined;
   const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
-      emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
+      emailRedirectTo: callbackUrl,
     },
   });
 
@@ -176,6 +193,9 @@ export async function signUp(
   if (data.user) {
     const next = safeNextPath(formData.get("next"));
     const count = await membershipCountForUser(data.user.id);
+    if (next && next.startsWith("/invite/")) {
+      redirect(next);
+    }
     if (count > 0) {
       redirect(next ?? "/dashboard");
     }
@@ -183,4 +203,146 @@ export async function signUp(
   }
 
   return { ok: true, sent: true, email: parsed.data.email };
+}
+
+// ─── Resend confirmation email ───────────────────────────────────────────
+
+export async function resendSignupConfirmation(
+  _prev: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const emailValue = formData.get("email");
+  const parsed = z
+    .object({
+      email: z
+        .string()
+        .trim()
+        .min(1, "Email is required")
+        .max(255)
+        .email("Must be a valid email"),
+    })
+    .safeParse({ email: emailValue });
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Enter the email address you signed up with.",
+      fieldErrors: fieldErrorsFrom(parsed.error),
+    };
+  }
+
+  const supabase = await createClient();
+  const ip = getClientIp(await headers()) ?? "unknown";
+  const allowed = await consumeRateLimit(
+    supabase,
+    `auth:resend:${ip}`,
+    5,
+    60 * 60,
+  );
+  if (!allowed) return { ok: false, error: RATE_LIMIT_COPY };
+
+  const origin = await getOrigin();
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email: parsed.data.email,
+    options: {
+      emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
+    },
+  });
+  if (error) {
+    // Don't leak whether the email exists — a friendly success either way.
+  }
+  return { ok: true, sent: true, email: parsed.data.email };
+}
+
+// ─── Password reset request (sends recovery email) ───────────────────────
+
+export async function requestPasswordReset(
+  _prev: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const parsed = z
+    .object({
+      email: z
+        .string()
+        .trim()
+        .min(1, "Email is required")
+        .max(255)
+        .email("Must be a valid email"),
+    })
+    .safeParse({ email: formData.get("email") });
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Please fix the errors below.",
+      fieldErrors: fieldErrorsFrom(parsed.error),
+    };
+  }
+
+  const supabase = await createClient();
+
+  // Rate-limit so this can't be used as a spam relay against the email service.
+  const ip = getClientIp(await headers()) ?? "unknown";
+  const allowed = await consumeRateLimit(
+    supabase,
+    `auth:reset:${ip}`,
+    5,
+    60 * 60,
+  );
+  if (!allowed) return { ok: false, error: RATE_LIMIT_COPY };
+
+  const origin = await getOrigin();
+  await supabase.auth.resetPasswordForEmail(parsed.data.email, {
+    redirectTo: origin
+      ? `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`
+      : undefined,
+  });
+  // Always report success to avoid leaking whether an account exists.
+  return { ok: true, sent: true, email: parsed.data.email };
+}
+
+// ─── Set a new password after recovery callback ──────────────────────────
+
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(200);
+
+export async function updatePassword(
+  _prev: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const parsed = z
+    .object({ password: passwordSchema })
+    .safeParse({ password: formData.get("password") });
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Please fix the errors below.",
+      fieldErrors: fieldErrorsFrom(parsed.error),
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return {
+      ok: false,
+      error:
+        "Your reset link has expired. Request a new one from the forgot-password page.",
+    };
+  }
+
+  const { error } = await supabase.auth.updateUser({
+    password: parsed.data.password,
+  });
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  redirect("/dashboard");
 }

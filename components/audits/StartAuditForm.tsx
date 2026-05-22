@@ -100,13 +100,17 @@ export function StartAuditForm({
   }, [pageRoster]);
 
   // Selection: per-shard set of selected URLs.
-  // We re-derive this when shards change identity (page navigation),
-  // otherwise it's purely client-side after first paint.
+  // We start with the recommended set (any shard whose sitemap marked it as
+  // a default) so non-technical users can just hit Start without opening
+  // the advanced URL picker. The picker overrides this state as the user
+  // toggles individual checkboxes.
   const [selection, setSelection] = useState<Record<string, Set<string>>>(
     () => {
       const init: Record<string, Set<string>> = {};
       for (const shard of shards) {
-        init[shard.url] = new Set();
+        init[shard.url] = shard.defaultChecked
+          ? new Set(shard.urls)
+          : new Set();
       }
       return init;
     },
@@ -273,41 +277,76 @@ export function StartAuditForm({
             new visibility scans.
           </span>
           <Link
-            href="/settings"
+            href="/usage"
             className="w-fit font-medium text-foreground underline underline-offset-4 hover:no-underline"
           >
-            Open Settings → Plans & billing
+            View usage
+          </Link>
+          <Link
+            href="/settings?tab=billing"
+            className="w-fit font-medium text-foreground underline underline-offset-4 hover:no-underline"
+          >
+            Plans &amp; billing
           </Link>
         </div>
       ) : null}
 
       {shards.length > 0 ? (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-sm font-medium">Categories</legend>
-          <p className="text-xs text-muted-foreground">
-            Detected from the site&apos;s sitemap. Expand a category to pick
-            individual URLs; toggle the category checkbox to select them all.
-          </p>
-          <div className="mt-1 flex flex-col gap-2">
-            {shards.map((shard) => (
-              <ShardRow
-                key={shard.url}
-                shard={shard}
-                selected={selection[shard.url] ?? new Set()}
-                onChange={(next) =>
-                  setSelection((prev) => ({ ...prev, [shard.url]: next }))
-                }
-              />
-            ))}
+        <div className="flex flex-col gap-3">
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+            <p className="font-medium text-foreground">
+              Recommended pages selected
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              We picked the most important pages from this site
+              {" "}({selectedTotal.toLocaleString()} URL
+              {selectedTotal === 1 ? "" : "s"}). You can hit Start, or open
+              Advanced below to pick specific pages.
+            </p>
           </div>
-        </fieldset>
+
+          <details className="rounded-md border border-border bg-card">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-medium text-foreground hover:bg-muted/40">
+              <span className="flex items-center gap-2">
+                <ChevronRight
+                  className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-90"
+                  aria-hidden
+                />
+                Advanced — choose specific pages
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {selectedTotal.toLocaleString()} selected
+              </span>
+            </summary>
+            <fieldset className="flex flex-col gap-2 border-t border-border p-3">
+              <legend className="sr-only">Page categories</legend>
+              <p className="text-xs text-muted-foreground">
+                Each group below is a section of the site. Toggle the box to
+                include or skip the whole group, or expand it to pick
+                individual pages.
+              </p>
+              <div className="mt-1 flex flex-col gap-2">
+                {shards.map((shard) => (
+                  <ShardRow
+                    key={shard.url}
+                    shard={shard}
+                    selected={selection[shard.url] ?? new Set()}
+                    onChange={(next) =>
+                      setSelection((prev) => ({ ...prev, [shard.url]: next }))
+                    }
+                  />
+                ))}
+              </div>
+            </fieldset>
+          </details>
+        </div>
       ) : (
         <div className="rounded-md border border-dashed border-border bg-muted/30 p-3 text-xs text-muted-foreground">
           <span className="flex items-start gap-2">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
             <span>
-              No sitemap categories detected — the runner will fall back to
-              a same-origin crawl starting at the homepage.
+              We couldn&apos;t find a sitemap for this site, so we&apos;ll
+              start from the homepage and crawl recommended pages.
             </span>
           </span>
         </div>
@@ -383,18 +422,17 @@ export function StartAuditForm({
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           <span>
-            <strong className="font-semibold">Heads up:</strong> auditing more
-            than {RUNTIME_WARN_THRESHOLD} URLs with all scoring layers enabled
-            often exceeds the 300 s function timeout, which causes the run to
-            be retried by the queue. Consider selecting fewer URLs.
+            <strong className="font-semibold">Heads up:</strong> scans over{" "}
+            {RUNTIME_WARN_THRESHOLD} pages can take a while and may be split
+            into multiple runs. Pick fewer pages if you want a faster scan.
           </span>
         </div>
       ) : showCostNote ? (
         <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           <span>
-            PSI and Anthropic calls run per-page, so cost and runtime scale
-            linearly with pages crawled.
+            Each page takes a few seconds to score, so more pages means a
+            longer scan.
           </span>
         </div>
       ) : null}

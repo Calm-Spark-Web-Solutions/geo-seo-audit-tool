@@ -498,13 +498,24 @@ remove this row.
 
 ---
 
+## Hosts
+
+| Domain | Project |
+|--------|---------|
+| **`app.ranklume.io`** | This repo — product app (login, dashboard, scans) |
+| **`ranklume.com`** | Separate marketing website (standalone project) |
+
+App deploy checklist: [`docs/APP_HOST.md`](docs/APP_HOST.md).
+
+---
+
 ## Deployment
 
 ### GitHub and Vercel
 
 1. Push the repo to GitHub and import it in Vercel; set the **Production Branch** (e.g. `main`).
 2. In **Vercel → Settings → Environment Variables**, add every variable from [`.env.example`](.env.example). Use **Production** vs **Preview** deliberately: previews should not receive production `SUPABASE_SERVICE_ROLE_KEY` unless you accept that risk.
-3. **`NEXT_PUBLIC_SITE_URL`** must be your **canonical HTTPS URL** (e.g. `https://www.example.com`). Do not rely on `VERCEL_URL` alone in production—it points at the `*.vercel.app` host, not your custom domain, and breaks stable auth/billing/runner behavior ([`lib/audit/runner-kick.ts`](lib/audit/runner-kick.ts)).
+3. **`NEXT_PUBLIC_SITE_URL`** must be **`https://app.ranklume.io`** in Production (canonical app host). Do not rely on `VERCEL_URL` alone—it points at `*.vercel.app` and breaks auth/billing/runner behavior ([`lib/audit/runner-kick.ts`](lib/audit/runner-kick.ts)).
 4. Set **`CRON_SECRET`** in Production to the same value Vercel uses for cron `Authorization: Bearer` (see [Vercel Cron](https://vercel.com/docs/cron-jobs)).
 5. Leave **`ALLOW_AUDITS_WITHOUT_SUBSCRIPTION`** unset or `0` in Production.
 6. Optional: add **`SENTRY_AUTH_TOKEN`** for builds so source maps upload (same `org` / `project` as [`next.config.ts`](next.config.ts)).
@@ -523,7 +534,7 @@ remove this row.
 
 ### Stripe
 
-1. Register the **live** webhook: `https://<your-domain>/api/stripe/webhook` (events per [docs/stripe-dashboard-setup.md](docs/stripe-dashboard-setup.md)); put the **live** signing secret in **`STRIPE_WEBHOOK_SECRET`**.
+1. Register the **live** webhook: `https://app.ranklume.io/api/stripe/webhook` (events per [docs/stripe-dashboard-setup.md](docs/stripe-dashboard-setup.md)); put the **live** signing secret in **`STRIPE_WEBHOOK_SECRET`**.
 2. Copy **live** `STRIPE_PRICE_*` IDs into Production env vars.
 
 ### After deploy

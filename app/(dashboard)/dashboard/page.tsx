@@ -2,15 +2,18 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Building2, Globe2, LayoutGrid, Plus } from "lucide-react";
 
+import { DashboardSetupChecklist } from "@/components/dashboard/DashboardSetupChecklist";
 import { CommunitiesLeaderboard } from "@/components/dashboard/CommunitiesLeaderboard";
 import type { CommunityLeaderRow } from "@/components/dashboard/CommunitiesLeaderboard";
 import { HeroBand } from "@/components/dashboard/HeroBand";
 import { RecentScansTable } from "@/components/dashboard/RecentScansTable";
 import type { RecentScanRow } from "@/components/dashboard/RecentScansTable";
+import { RunScanCta } from "@/components/dashboard/RunScanCta";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { getActiveOrgCookie } from "@/lib/active-org-cookie";
+import { readSetupChecklist } from "@/lib/onboarding/setup-checklist";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -81,6 +84,9 @@ export default async function DashboardPage({
   const sp = await searchParams;
   const orgParam = typeof sp.org === "string" ? sp.org : null;
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: companyListRaw } = await supabase
     .from("companies")
@@ -94,17 +100,17 @@ export default async function DashboardPage({
       <>
         <PageHeader
           title="Dashboard"
-          description="Welcome — let's set up your first company so you can run visibility scans."
+          description="Welcome — let's set up your first organization so you can run visibility scans."
         />
         <EmptyState
           icon={Building2}
-          title="Create your first company"
-          description="A company groups the communities you manage. Add one to start running SEO and GEO checks."
+          title="Create your first organization"
+          description="An organization groups the community websites you manage. Add one to start running visibility scans."
           actions={
             <Button asChild>
               <Link href="/companies/new">
                 <Plus className="h-4 w-4" aria-hidden />
-                Create company
+                Create organization
               </Link>
             </Button>
           }
@@ -133,6 +139,45 @@ export default async function DashboardPage({
   const communities = (commRaw ?? []) as CommunityRow[];
   const communityCount = communities.length;
   const commIds = communities.map((c) => c.id);
+  const firstCommunityId = communities[0]?.id ?? null;
+
+  const { data: googleConn } = await supabase
+    .from("company_google_connections")
+    .select("company_id")
+    .eq("company_id", activeCompany.id)
+    .maybeSingle();
+
+  // ── AI assistant referral aggregate (latest snapshot per community) ──────
+  // Used by HeroBand to switch from marketing copy to a real KPI when any
+  // community in the active org has logged AI assistant clicks in the last
+  // 28 days. Pulls one row per community (most recent snapshot_date) and
+  // sums sessions across all `ga4_ai_referrals` rows.
+  let aiSessions28d = 0;
+  let aiCommunityCount = 0;
+  if (commIds.length > 0) {
+    const { data: snapshots } = await supabase
+      .from("community_google_metrics_snapshots")
+      .select("community_id, snapshot_date, ga4_ai_referrals")
+      .in("community_id", commIds)
+      .order("snapshot_date", { ascending: false });
+    const seen = new Set<string>();
+    for (const row of snapshots ?? []) {
+      const id = row.community_id as string;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const referrals = (row.ga4_ai_referrals ?? []) as Array<{
+        sessions?: number | null;
+      }>;
+      const total = referrals.reduce(
+        (acc, r) => acc + (r.sessions ?? 0),
+        0,
+      );
+      if (total > 0) {
+        aiSessions28d += total;
+        aiCommunityCount += 1;
+      }
+    }
+  }
 
   // ── Audits (150 newest for this org) ─────────────────────────────────────
   let recentAudits: AuditRow[] = [];
@@ -233,6 +278,10 @@ export default async function DashboardPage({
   });
 
   const showCommunityNudge = communityCount === 0;
+  const setupChecklist = readSetupChecklist(
+    user?.user_metadata,
+    activeCompany.id,
+  );
 
   const headerDescription: ReactNode = (
     <>
@@ -264,29 +313,44 @@ export default async function DashboardPage({
             )}
             <Button asChild variant="outline">
               <Link href={`/companies/${activeCompany.id}`}>
-                Browse communities
+                View communities
               </Link>
             </Button>
+            <RunScanCta
+              orgId={activeCompany.id}
+              communities={communities.map((c) => ({ id: c.id, name: c.name }))}
+            />
           </div>
         }
+      />
+
+      <DashboardSetupChecklist
+        orgId={activeCompany.id}
+        hasCommunity={communityCount > 0}
+        googleConnected={Boolean(googleConn)}
+        hasCompleteScan={completed.length > 0}
+        firstCommunityId={firstCommunityId}
+        initialManual={setupChecklist.manual}
+        initialDismissed={setupChecklist.dismissed}
       />
 
       {showCommunityNudge ? (
         <EmptyState
           icon={Globe2}
           title="Add your first community"
-          description="Communities are the sites you scan. Add one to start running SEO and GEO checks."
+          description="A community is one website you want to track. Add one to run your first visibility scan."
           actions={
             <Button asChild>
               <Link href={`/companies/${activeCompany.id}/new-community`}>
                 <Plus className="h-4 w-4" aria-hidden />
-                New community
+                Add community
               </Link>
             </Button>
           }
         />
       ) : (
         <>
+
           {/* ── Hero band: score ring + trend chart + KPI strip ─────── */}
           <HeroBand
             score={avgScore}
@@ -298,6 +362,8 @@ export default async function DashboardPage({
             communityCount={communityCount}
             totalScans={exactAuditCount}
             scansThisMonth={scansThisMonth}
+            aiSessions28d={aiSessions28d}
+            aiCommunityCount={aiCommunityCount}
           />
 
           {/* ── Communities leaderboard ──────────────────────────────── */}
