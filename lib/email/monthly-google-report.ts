@@ -17,6 +17,10 @@ export interface MonthlyGoogleReportInput {
   reportMonthLabel: string;
   siteUrl: string;
   communities: MonthlyReportCommunityRow[];
+  /** When false, intro notes metrics were not refreshed this run. Default true. */
+  syncMetricsBeforeSend?: boolean;
+  /** When false, org-wide note that automatic rescans are disabled. Default true. */
+  queueMonthlyScans?: boolean;
 }
 
 function escapeHtml(text: string): string {
@@ -88,6 +92,23 @@ export function buildMonthlyGoogleReportHtml(
     })
     .join("");
 
+  const syncOn = input.syncMetricsBeforeSend !== false;
+  const scansOn = input.queueMonthlyScans !== false;
+  let introNote: string;
+  if (syncOn && scansOn) {
+    introNote =
+      "Traffic totals below were refreshed today. Visibility scans may still be running in the background.";
+  } else if (syncOn) {
+    introNote =
+      "Traffic totals below were refreshed today. Automatic monthly visibility rescans are disabled in your organization settings.";
+  } else if (scansOn) {
+    introNote =
+      "Traffic totals below are from the most recent sync in the app. Visibility scans may still be running in the background.";
+  } else {
+    introNote =
+      "Traffic totals below are from the most recent sync in the app. Automatic monthly visibility rescans are disabled in your organization settings.";
+  }
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Monthly Google report</title></head>
@@ -97,7 +118,7 @@ export function buildMonthlyGoogleReportHtml(
     ${escapeHtml(input.reportMonthLabel)} · Last 28 days (Search Console &amp; Analytics)
   </p>
   <p style="margin:0 0 20px;font-size:14px;">
-    Traffic totals below were refreshed today. Visibility scans may still be running in the background.
+    ${escapeHtml(introNote)}
   </p>
   <table style="width:100%;border-collapse:collapse;font-size:14px;">
     <thead>

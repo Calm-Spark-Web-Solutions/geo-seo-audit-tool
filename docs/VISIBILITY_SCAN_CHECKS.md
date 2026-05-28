@@ -206,7 +206,14 @@ Per-page: `ga4_measurement_id` in `lib/scoring/analytics-tags.ts` (merged into p
 | `google_oauth_token` | Google connection *(warn when refresh fails)* |
 | `google_api_error` | Google API *(warn on partial API failure)* |
 
-Expert checklist rows `gsc_sitemap_submitted` and `gsc_monitoring` remain manual; automated GSC checks appear separately on the scan report.
+Some expert checklist rows are **hidden** when Google replaces them (`lib/checklists/manual-google-coverage.ts`):
+
+| Manual key | Hidden when |
+|------------|-------------|
+| `gsc_sitemap_submitted`, `gsc_monitoring` | Company Google OAuth connected **and** community GSC property mapped |
+| `ga4_traffic_received` | OAuth connected **and** GA4 mapped **and** latest complete scan’s automated `ga4_data_received` is **pass** |
+
+When hidden, use the scan report’s **Google Search Console & GA4** section (same keys as the API checks above). PDF appendix omits replaced manual rows for that export’s audit.
 
 ---
 
@@ -218,8 +225,9 @@ These are **not** produced by the automated scorer. They are template rows for h
 
 | Key | Label |
 |-----|--------|
-| `gsc_sitemap_submitted` | XML sitemap submitted in Google Search Console |
-| `gsc_monitoring` | Google Search Console property verified and monitored |
+| `gsc_sitemap_submitted` | XML sitemap submitted in Google Search Console *(hidden when GSC mapped — see above)* |
+| `gsc_monitoring` | Google Search Console property verified and monitored *(hidden when GSC mapped)* |
+| `ga4_traffic_received` | GA4 property receiving traffic (28-day check) *(hidden when GA4 mapped and scan `ga4_data_received` passes)* |
 | `crawl_budget_reviewed` | Crawl budget not wasted on low-value paths (manual review) |
 
 ### Site performance
@@ -283,3 +291,4 @@ These are **not** produced by the automated scorer. They are template rows for h
 | Analytics tag detection | `lib/scoring/analytics-tags.ts` |
 | GSC / GA4 OAuth & API checks | `lib/integrations/google/` |
 | Manual checklist template | `lib/checklists/community-manual.ts` |
+| Manual ↔ Google visibility | `lib/checklists/manual-google-coverage.ts` |

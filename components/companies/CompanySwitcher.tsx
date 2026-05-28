@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useParams, usePathname } from "next/navigation";
 import { ChevronsUpDown, Plus } from "lucide-react";
 
@@ -30,6 +30,11 @@ export function CompanySwitcher({
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const menuId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPath, setMenuPath] = useState(pathname);
+  if (pathname !== menuPath) {
+    setMenuPath(pathname);
+    setMenuOpen(false);
+  }
 
   const selectedId = selectedOrganizationId(
     companies,
@@ -41,14 +46,10 @@ export function CompanySwitcher({
     ? companies.find((c) => c.id === selectedId) ?? null
     : null;
 
-  useEffect(() => {
-    detailsRef.current?.removeAttribute("open");
-    setMenuOpen(false);
-  }, [pathname]);
-
   return (
     <div className="relative">
       <details
+        key={pathname}
         ref={detailsRef}
         className="group"
         onToggle={(e) => setMenuOpen(e.currentTarget.open)}

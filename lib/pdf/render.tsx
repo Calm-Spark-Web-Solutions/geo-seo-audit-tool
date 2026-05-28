@@ -1,7 +1,11 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { COMMUNITY_MANUAL_ITEMS } from "@/lib/checklists/community-manual";
+import { loadManualGoogleCoverageForCommunity } from "@/lib/checklists/load-manual-google-coverage";
+import {
+  getVisibleCommunityManualItems,
+  type ManualGoogleCoverageInput,
+} from "@/lib/checklists/manual-google-coverage";
 import { AuditReportPdfDocument, type PdfReportVariant } from "@/lib/pdf/report";
 import type {
   Audit,
@@ -24,9 +28,12 @@ export interface AuditPdfPayload {
   manualChecklistRows: ManualChecklistPdfRow[];
 }
 
-function buildManualPdfRows(community: Community | null): ManualChecklistPdfRow[] {
+function buildManualPdfRows(
+  community: Community | null,
+  coverage: ManualGoogleCoverageInput,
+): ManualChecklistPdfRow[] {
   const saved: CommunityManualResults = community?.manual_check_results ?? {};
-  return COMMUNITY_MANUAL_ITEMS.map((item) => ({
+  return getVisibleCommunityManualItems(coverage).map((item) => ({
     key: item.key,
     category: item.category,
     label: item.label,
@@ -93,6 +100,17 @@ export async function loadAuditPdfPayload(
   const googleFieldChecks = Array.isArray(gf) ? (gf as AuditCheck[]) : [];
   const typedCommunity = (community as Community | null) ?? null;
 
+  const manualGoogleCoverage = typedCommunity
+    ? await loadManualGoogleCoverageForCommunity(supabase, typedCommunity.id, {
+        latestGoogleFieldChecks: googleFieldChecks,
+      })
+    : {
+        companyGoogleConnected: false,
+        gscSiteUrl: null,
+        ga4PropertyId: null,
+        latestGoogleFieldChecks: googleFieldChecks,
+      };
+
   return {
     audit: typedAudit,
     pages: (pages ?? []) as AuditPage[],
@@ -101,7 +119,10 @@ export async function loadAuditPdfPayload(
     siteWideChecks,
     cruxFieldChecks,
     googleFieldChecks,
-    manualChecklistRows: buildManualPdfRows(typedCommunity),
+    manualChecklistRows: buildManualPdfRows(
+      typedCommunity,
+      manualGoogleCoverage,
+    ),
   };
 }
 

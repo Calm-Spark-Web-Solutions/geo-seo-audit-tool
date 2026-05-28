@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activeVolumeDiscountTierIndex,
   applyPlanLimitsOverride,
   effectiveMonthlyNewPagesCap,
   effectiveMonthlyScans,
@@ -10,8 +11,14 @@ import {
   PLAN_LIMITS_BY_SLUG,
   resolvePlanLimits,
   RUNS_PACK_PRICING,
+  stripeVolumeTierRows,
   TIER_PRICING,
   UNLIMITED_PLAN_LIMITS,
+  volumeDiscountedSubtotal,
+  volumeDiscountedUnitUsd,
+  volumeDiscountFraction,
+  volumeDiscountPercent,
+  VOLUME_DISCOUNT_TIERS,
 } from "./plan-limits";
 
 describe("plan-limits", () => {
@@ -153,5 +160,52 @@ describe("plan-limits", () => {
     const twelve = RUNS_PACK_PRICING.unitMonthlyUsd * 12;
     expect(RUNS_PACK_PRICING.unitYearlyUsd).toBeLessThan(twelve);
     expect(RUNS_PACK_PRICING.monthlyScansPerUnit).toBe(10);
+  });
+
+  it("VOLUME_DISCOUNT_TIERS matches product policy", () => {
+    expect(VOLUME_DISCOUNT_TIERS).toEqual([
+      { minCommunities: 5, percentOff: 5 },
+      { minCommunities: 10, percentOff: 10 },
+      { minCommunities: 20, percentOff: 15 },
+      { minCommunities: 50, percentOff: 20 },
+    ]);
+  });
+
+  it("volumeDiscountPercent and fraction follow breakpoints", () => {
+    expect(volumeDiscountPercent(4)).toBe(0);
+    expect(volumeDiscountPercent(5)).toBe(5);
+    expect(volumeDiscountPercent(9)).toBe(5);
+    expect(volumeDiscountPercent(10)).toBe(10);
+    expect(volumeDiscountPercent(49)).toBe(15);
+    expect(volumeDiscountPercent(50)).toBe(20);
+    expect(volumeDiscountFraction(10)).toBe(0.1);
+  });
+
+  it("activeVolumeDiscountTierIndex highlights the right tier", () => {
+    expect(activeVolumeDiscountTierIndex(3)).toBe(-1);
+    expect(activeVolumeDiscountTierIndex(5)).toBe(0);
+    expect(activeVolumeDiscountTierIndex(10)).toBe(1);
+    expect(activeVolumeDiscountTierIndex(50)).toBe(3);
+  });
+
+  it("volumeDiscountedSubtotal applies percent off entire tier line", () => {
+    // Basic $29 × 5 = $145 → 5% off → $138
+    expect(volumeDiscountedSubtotal(29, 5)).toBe(138);
+    expect(volumeDiscountedSubtotal(29, 4)).toBe(116);
+  });
+
+  it("volumeDiscountedUnitUsd matches subtotal / quantity", () => {
+    const qty = 10;
+    const unit = 59;
+    const sub = volumeDiscountedSubtotal(unit, qty);
+    expect(volumeDiscountedUnitUsd(unit, qty)).toBe(sub / qty);
+  });
+
+  it("stripeVolumeTierRows lists Stripe volume tiers for a list price", () => {
+    const rows = stripeVolumeTierRows(29);
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toEqual({ upTo: 4, unitUsd: 29, percentOff: 0 });
+    expect(rows[1]).toEqual({ upTo: 9, unitUsd: 27.55, percentOff: 5 });
+    expect(rows[4]).toEqual({ upTo: null, unitUsd: 23.2, percentOff: 20 });
   });
 });

@@ -18,7 +18,7 @@ export function SettingsTabs({ active }: { active: SettingsTabId }) {
     <div
       role="tablist"
       aria-label="Settings sections"
-      className="-mx-1 flex gap-1 overflow-x-auto border-b border-border px-1 pb-px"
+      className="-mx-1 flex gap-1 overflow-x-auto border-b border-border px-1"
     >
       {TABS.map((tab) => {
         const isActive = tab.id === active;
@@ -29,10 +29,10 @@ export function SettingsTabs({ active }: { active: SettingsTabId }) {
             role="tab"
             aria-selected={isActive}
             className={cn(
-              "shrink-0 rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              "shrink-0 -mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
               isActive
                 ? "border-foreground text-foreground"
-                : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+                : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {tab.label}

@@ -49,7 +49,6 @@ export interface GoogleMetricsSnapshot {
 export async function runGoogleFieldChecks(
   supabase: SupabaseClient,
   communityId: string,
-  _websiteUrl: string,
 ): Promise<GoogleFieldChecksResult> {
   const checks: AuditCheck[] = [];
   let metrics: GoogleMetricsSnapshot | null = null;

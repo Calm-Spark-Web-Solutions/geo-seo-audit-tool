@@ -115,12 +115,19 @@ export function CompanyGoogleIntegrationsPanel({
     [communities],
   );
 
-  useEffect(() => {
-    if (!googleConnected || !oauthConfigured) {
+  const canLoadCatalog = googleConnected && oauthConfigured;
+  const [prevCanLoadCatalog, setPrevCanLoadCatalog] = useState(canLoadCatalog);
+  if (canLoadCatalog !== prevCanLoadCatalog) {
+    setPrevCanLoadCatalog(canLoadCatalog);
+    if (!canLoadCatalog) {
       setCatalog(null);
+      setLoadError(null);
       initRows(null);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!canLoadCatalog) return;
     let cancelled = false;
     void (async () => {
       const result = await fetchGooglePropertiesCatalog(companyId);
@@ -138,7 +145,7 @@ export function CompanyGoogleIntegrationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [companyId, googleConnected, oauthConfigured, initRows]);
+  }, [companyId, canLoadCatalog, initRows]);
 
   async function disconnect() {
     setDisconnecting(true);

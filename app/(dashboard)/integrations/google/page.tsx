@@ -2,6 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { CompanyGoogleIntegrationsPanel } from "@/components/integrations/CompanyGoogleIntegrationsPanel";
+import { MonthlyReportSettingsCard } from "@/components/integrations/MonthlyReportSettingsCard";
+import {
+  loadMonthlyReportSettings,
+  resolveMonthlyReportRecipients,
+} from "@/lib/integrations/google/monthly-report-recipients";
+import { formatReportMonthLabel } from "@/lib/integrations/google/monthly-report";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -142,6 +148,34 @@ export default async function GoogleIntegrationsPage({
   });
 
   const canManage = role === "owner" || role === "admin";
+  const googleConnected = Boolean(googleConn);
+
+  let monthlyReportSettings = null;
+  let monthlyRecipientPreview: string[] = [];
+  let lastSentLabel: string | null = null;
+
+  if (canManage && googleConnected) {
+    monthlyReportSettings = await loadMonthlyReportSettings(supabase, orgId);
+    monthlyRecipientPreview = await resolveMonthlyReportRecipients(
+      supabase,
+      orgId,
+      monthlyReportSettings,
+    );
+
+    const { data: lastReport } = await supabase
+      .from("company_monthly_google_reports")
+      .select("report_month")
+      .eq("company_id", orgId)
+      .order("report_month", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastReport?.report_month) {
+      lastSentLabel = formatReportMonthLabel(
+        lastReport.report_month as string,
+      );
+    }
+  }
 
   return (
     <>
@@ -164,20 +198,30 @@ export default async function GoogleIntegrationsPage({
       ) : null}
 
       {canManage ? (
-        <CompanyGoogleIntegrationsPanel
-          companyId={orgId}
-          companyName={activeCompany.name}
-          googleConnected={Boolean(googleConn)}
-          googleAccountEmail={
-            (googleConn?.google_account_email as string | null) ?? null
-          }
-          googleLastError={
-            (googleConn?.last_error as string | null) ?? null
-          }
-          communities={googleCommunityRows}
-          oauthConfigured={isGoogleOAuthConfigured()}
-          showConnectedFlash={showGoogleConnectedFlash}
-        />
+        <div className="space-y-6">
+          <CompanyGoogleIntegrationsPanel
+            companyId={orgId}
+            companyName={activeCompany.name}
+            googleConnected={googleConnected}
+            googleAccountEmail={
+              (googleConn?.google_account_email as string | null) ?? null
+            }
+            googleLastError={
+              (googleConn?.last_error as string | null) ?? null
+            }
+            communities={googleCommunityRows}
+            oauthConfigured={isGoogleOAuthConfigured()}
+            showConnectedFlash={showGoogleConnectedFlash}
+          />
+          {googleConnected && monthlyReportSettings ? (
+            <MonthlyReportSettingsCard
+              companyId={orgId}
+              settings={monthlyReportSettings}
+              recipientPreview={monthlyRecipientPreview}
+              lastSentLabel={lastSentLabel}
+            />
+          ) : null}
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground">
           Only organization owners and admins can connect Google. Ask an admin to

@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, PanelLeft, PanelLeftClose } from "lucide-react";
+import {
+  LayoutDashboard,
+  PanelLeft,
+  PanelLeftClose,
+  X,
+} from "lucide-react";
 
 import { CompanySwitcher } from "@/components/companies/CompanySwitcher";
 import { Brand } from "@/components/layout/Brand";
@@ -24,6 +29,7 @@ export function SidebarContent({
   activeOrganizationIdCookie,
   navHrefs,
   onNavigate,
+  onClose,
   variant = "desktop",
 }: {
   companies: Company[];
@@ -33,6 +39,8 @@ export function SidebarContent({
   /** From server layout — stable across SSR and hydration. */
   navHrefs: SidebarNavHrefs;
   onNavigate?: () => void;
+  /** Mobile drawer: close control beside brand. */
+  onClose?: () => void;
   variant?: "desktop" | "mobile";
 }) {
   const pathname = usePathname();
@@ -46,8 +54,9 @@ export function SidebarContent({
     pathname === "/dashboard" || pathname.startsWith("/dashboard?");
 
   /** Scrollable cap: long community lists scroll; short lists do not push Admin to the bottom of the viewport. */
-  const communitiesScrollClass =
-    "min-h-0 shrink overflow-y-auto py-2 max-h-[min(24rem,calc(100vh-14rem))]";
+  const communitiesScrollClass = isMobile
+    ? "min-h-0 shrink overflow-y-auto py-2 max-h-[min(24rem,calc(100dvh-13rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))]"
+    : "min-h-0 shrink overflow-y-auto py-2 max-h-[min(24rem,calc(100vh-14rem))]";
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -56,7 +65,18 @@ export function SidebarContent({
           <div className={cn("min-w-0", !railCollapsed && "flex-1")}>
             <Brand href={dashboardHref} iconOnly={railCollapsed} size="sm" />
           </div>
-          {!isMobile ? (
+          {isMobile && onClose ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              aria-label="Close navigation menu"
+              onClick={onClose}
+            >
+              <X className="h-5 w-5" aria-hidden />
+            </Button>
+          ) : !isMobile ? (
             <Button
               type="button"
               variant="ghost"
@@ -132,6 +152,7 @@ export function SidebarContent({
             avatarUrl={account.avatarUrl}
             collapsed={railCollapsed}
             usageHref={usageHref}
+            hideUserMenu={isMobile}
           />
         ) : null}
       </div>

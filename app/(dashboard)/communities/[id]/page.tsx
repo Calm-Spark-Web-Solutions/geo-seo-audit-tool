@@ -20,6 +20,7 @@ import {
 } from "@/lib/audit/reader-copy";
 import { createClient } from "@/lib/supabase/server";
 import { EXPERT_CHECKLIST_CARD_DESCRIPTION } from "@/lib/checklists/expert-checklist-copy";
+import { loadManualGoogleCoverageForCommunity } from "@/lib/checklists/load-manual-google-coverage";
 import type {
   Audit,
   Community,
@@ -80,6 +81,11 @@ export default async function CommunityDetailPage({
   }
 
   if (!community) notFound();
+
+  const manualGoogleCoverage = await loadManualGoogleCoverageForCommunity(
+    supabase,
+    id,
+  );
 
   type CompanyRef = { id: string; name: string };
   type Row = Community & {
@@ -244,6 +250,7 @@ export default async function CommunityDetailPage({
       <CommunityManualChecklist
         communityId={typedCommunity.id}
         initialResults={manualResults}
+        manualGoogleCoverage={manualGoogleCoverage}
         cardDescription={EXPERT_CHECKLIST_CARD_DESCRIPTION}
         variant="collapsible"
       />

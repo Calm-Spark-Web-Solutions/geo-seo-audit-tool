@@ -1,11 +1,7 @@
 import type Stripe from "stripe";
 
 import { PACK_PRICING, RUNS_PACK_PRICING } from "@/lib/billing/plan-limits";
-import {
-  isCheckoutAddonPriceKey,
-  isCheckoutTierPriceKey,
-  planSlugFromStripePriceId,
-} from "@/lib/billing/price-map";
+import { classifySubscriptionItems } from "@/lib/billing/subscription-items";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getStripe } from "@/lib/stripe/server";
 
@@ -102,6 +98,8 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     customerId,
     subscription,
   });
+
+  await warnIfMultipleLiveSubscriptions(customerId, subscription.id);
 }
 
 async function handleSubscriptionUpsert(subscription: Stripe.Subscription) {
@@ -123,6 +121,8 @@ async function handleSubscriptionUpsert(subscription: Stripe.Subscription) {
     customerId,
     subscription,
   });
+
+  await warnIfMultipleLiveSubscriptions(customerId, subscription.id);
 }
 
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
@@ -160,65 +160,36 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   );
 }
 
-interface SubscriptionItemSummary {
-  tier: { slug: string; quantity: number } | null;
-  pagesPack: { slug: string; quantity: number } | null;
-  runsPack: { slug: string; quantity: number } | null;
-  /** Raw price id of the first item, used for fallback labeling only. */
-  firstPriceId: string | null;
-}
+const LIVE_STRIPE_STATUSES: Stripe.SubscriptionListParams.Status[] = [
+  "active",
+  "trialing",
+  "past_due",
+];
 
-function isPagesPackSlug(slug: string): boolean {
-  return slug === "pages_pack_monthly" || slug === "pages_pack_yearly";
-}
-
-function isRunsPackSlug(slug: string): boolean {
-  return slug === "runs_pack_monthly" || slug === "runs_pack_yearly";
-}
-
-/**
- * Iterate subscription items once, splitting them into a tier item and
- * optional Page Pack / Run Pack add-ons. If Stripe sends duplicate add-ons
- * of the same kind, the first wins.
- */
-function classifySubscriptionItems(
-  subscription: Stripe.Subscription,
-): SubscriptionItemSummary {
-  let tier: SubscriptionItemSummary["tier"] = null;
-  let pagesPack: SubscriptionItemSummary["pagesPack"] = null;
-  let runsPack: SubscriptionItemSummary["runsPack"] = null;
-  let firstPriceId: string | null = null;
-
-  for (const item of subscription.items.data) {
-    const priceId = item.price?.id ?? "";
-    if (!firstPriceId && priceId) firstPriceId = priceId;
-
-    const slug = planSlugFromStripePriceId(priceId);
-    if (!slug) continue;
-
-    const quantityRaw = item.quantity;
-    const quantity =
-      typeof quantityRaw === "number" && Number.isFinite(quantityRaw) && quantityRaw > 0
-        ? Math.floor(quantityRaw)
-        : 1;
-
-    if (!tier && isCheckoutTierPriceKey(slug)) {
-      tier = { slug, quantity };
-      continue;
-    }
-    if (isCheckoutAddonPriceKey(slug)) {
-      if (!pagesPack && isPagesPackSlug(slug)) {
-        pagesPack = { slug, quantity };
-        continue;
-      }
-      if (!runsPack && isRunsPackSlug(slug)) {
-        runsPack = { slug, quantity };
-        continue;
+async function warnIfMultipleLiveSubscriptions(
+  customerId: string,
+  currentSubId: string,
+): Promise<void> {
+  const stripe = getStripe();
+  const otherSubIds: string[] = [];
+  for (const status of LIVE_STRIPE_STATUSES) {
+    const page = await stripe.subscriptions.list({
+      customer: customerId,
+      status,
+      limit: 100,
+    });
+    for (const sub of page.data) {
+      if (sub.id !== currentSubId) {
+        otherSubIds.push(sub.id);
       }
     }
   }
-
-  return { tier, pagesPack, runsPack, firstPriceId };
+  if (otherSubIds.length > 0) {
+    console.warn(
+      "[stripe webhook] customer has multiple live subscriptions:",
+      { customerId, currentSubId, otherSubIds },
+    );
+  }
 }
 
 async function upsertSubscriptionFromStripe({

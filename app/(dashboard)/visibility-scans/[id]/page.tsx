@@ -8,6 +8,7 @@ import { CommunityManualChecklist } from "@/components/communities/CommunityManu
 import { InlineErrorCard } from "@/components/layout/InlineErrorCard";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { EXPERT_CHECKLIST_CARD_DESCRIPTION } from "@/lib/checklists/expert-checklist-copy";
+import { loadManualGoogleCoverageForCommunity } from "@/lib/checklists/load-manual-google-coverage";
 import { userAllowedPdfExport } from "@/lib/billing/subscription-access";
 import { createClient } from "@/lib/supabase/server";
 import { isStripeConfigured } from "@/lib/stripe/server";
@@ -163,6 +164,21 @@ export default async function AuditReportPage({
     }
   }
 
+  const auditGoogleFieldChecks = Array.isArray(typedAudit.google_field_checks)
+    ? (typedAudit.google_field_checks as AuditCheck[])
+    : null;
+
+  const manualGoogleCoverage = typedCommunity
+    ? await loadManualGoogleCoverageForCommunity(supabase, typedCommunity.id, {
+        latestGoogleFieldChecks: auditGoogleFieldChecks,
+      })
+    : {
+        companyGoogleConnected: false,
+        gscSiteUrl: null,
+        ga4PropertyId: null,
+        latestGoogleFieldChecks: auditGoogleFieldChecks,
+      };
+
   return (
     <>
       <PageHeader
@@ -220,6 +236,7 @@ export default async function AuditReportPage({
         <CommunityManualChecklist
           communityId={typedCommunity.id}
           initialResults={typedCommunity.manual_check_results}
+          manualGoogleCoverage={manualGoogleCoverage}
           cardDescription={EXPERT_CHECKLIST_CARD_DESCRIPTION}
           variant="collapsible"
         />

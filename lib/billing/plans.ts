@@ -41,7 +41,7 @@ function tierBullets(extras: string[]): string[] {
   ];
 }
 
-/** Three public tiers shown as plan-builder picker cards + Partner callout. */
+/** Three public tiers shown as plan-builder picker cards. */
 export const PUBLIC_TIERS: PublicTierCard[] = [
   {
     id: "residence",
@@ -87,15 +87,6 @@ export const PUBLIC_TIERS: PublicTierCard[] = [
     yearlyUnitUsd: TIER_PRICING.portfolio.yearlyUsd,
   },
 ];
-
-/** Partner program — invoiced pricing for very large or custom accounts. */
-export const PARTNER_PROGRAM = {
-  name: "Partner program",
-  description:
-    "For organizations with more than 100 communities or custom roster, audit-start, and allowance needs. We design the plan with you and invoice off-platform.",
-  priceNote: "Custom — invitation / contact only",
-  checkoutKey: "partner_monthly",
-};
 
 const PLAN_LABELS: Record<string, string> = {
   residence_monthly: `${TIER_PRICING.residence.label} per community (monthly)`,

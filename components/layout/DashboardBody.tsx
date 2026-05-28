@@ -30,10 +30,8 @@ export function DashboardBody({
   return (
     <div
       className={cn(
-        "grid min-h-0 flex-1 grid-cols-1 md:items-stretch",
-        hydrated && collapsed
-          ? "md:grid-cols-[4rem_minmax(0,1fr)]"
-          : "md:grid-cols-[15rem_minmax(0,1fr)]",
+        "grid min-h-0 flex-1 grid-cols-1 md:items-stretch md:grid-cols-[15rem_minmax(0,1fr)]",
+        hydrated && collapsed && "md:grid-cols-[4rem_minmax(0,1fr)]",
       )}
     >
       <Sidebar

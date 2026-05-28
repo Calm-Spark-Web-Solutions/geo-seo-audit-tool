@@ -18,6 +18,7 @@ export function SidebarAccountSection({
   avatarUrl,
   collapsed,
   usageHref = "/usage",
+  hideUserMenu = false,
 }: {
   quota: AuditQuotaSnapshot;
   email: string | null;
@@ -25,6 +26,8 @@ export function SidebarAccountSection({
   avatarUrl?: string | null;
   collapsed?: boolean;
   usageHref?: string;
+  /** Mobile drawer: account actions live in the topbar UserMenu only. */
+  hideUserMenu?: boolean;
 }) {
   const effectiveQuota: AuditQuotaSnapshot =
     quota.kind === "limited" && quota.limit <= 0
@@ -94,13 +97,15 @@ export function SidebarAccountSection({
       )}
     >
       {quotaLine}
-      <UserMenu
-        email={email}
-        fullName={fullName}
-        avatarUrl={avatarUrl}
-        placement="sidebar"
-        compact={collapsed}
-      />
+      {hideUserMenu ? null : (
+        <UserMenu
+          email={email}
+          fullName={fullName}
+          avatarUrl={avatarUrl}
+          placement="sidebar"
+          compact={collapsed}
+        />
+      )}
     </div>
   );
 }

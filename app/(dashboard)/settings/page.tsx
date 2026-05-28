@@ -300,9 +300,7 @@ export default async function SettingsPage({
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   Pick the number of communities you need, choose a per-community
-                  tier, and switch between monthly and yearly billing. The
-                  Partner program covers organizations larger than this builder
-                  supports.
+                  tier, and switch between monthly and yearly billing.
                 </p>
                 <PricingCards
                   subscription={subscription}

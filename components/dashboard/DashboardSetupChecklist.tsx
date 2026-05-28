@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { CheckCircle2, Circle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -93,16 +93,13 @@ export function DashboardSetupChecklist({
     null,
   );
 
-  useEffect(() => {
+  const serverProgressKey = `${initialDismissed}:${initialManual.community}:${initialManual.google}:${initialManual.scan}:${initialManual.team}`;
+  const [syncedProgressKey, setSyncedProgressKey] = useState(serverProgressKey);
+  if (serverProgressKey !== syncedProgressKey) {
+    setSyncedProgressKey(serverProgressKey);
     setManual(initialManual);
     setDismissed(initialDismissed);
-  }, [
-    initialDismissed,
-    initialManual.community,
-    initialManual.google,
-    initialManual.scan,
-    initialManual.team,
-  ]);
+  }
 
   const ctx: Ctx = { orgId, firstCommunityId };
   const steps = buildSetupChecklistSteps({

@@ -19,7 +19,7 @@ Used for:
 - Stripe checkout return URLs  
 - Audit runner kick URLs  
 - Google OAuth callback base (see below)  
-- Monthly report links in email  
+- Monthly report links in email (recipients configurable under Integrations → Google)  
 
 **Do not** use `VERCEL_URL` (`*.vercel.app`) as the canonical URL in production.
 
