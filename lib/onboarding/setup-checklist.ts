@@ -18,13 +18,33 @@ export function isValidSetupChecklistOrgId(orgId: string): boolean {
   return ORG_ID_UUID_RE.test(trimmed);
 }
 
-function readOrgState(
-  map: Record<string, SetupChecklistOrgState> | undefined,
+type SetupChecklistOrgMap = Map<string, SetupChecklistOrgState>;
+
+function setupChecklistMapFromRecord(
+  record: Record<string, SetupChecklistOrgState> | undefined,
+): SetupChecklistOrgMap {
+  const map: SetupChecklistOrgMap = new Map();
+  if (!record) return map;
+  for (const key of Object.keys(record)) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+    const value = record[key];
+    if (value !== undefined) map.set(key, value);
+  }
+  return map;
+}
+
+function setupChecklistRecordFromMap(
+  map: SetupChecklistOrgMap,
+): Record<string, SetupChecklistOrgState> {
+  return Object.fromEntries(map);
+}
+
+function readOrgStateFromMap(
+  map: SetupChecklistOrgMap,
   orgId: string,
 ): SetupChecklistOrgState | undefined {
-  if (!map) return undefined;
   const storageKey = setupChecklistStorageKey(orgId);
-  return map[storageKey] ?? map[orgId];
+  return map.get(storageKey) ?? map.get(orgId);
 }
 
 export const SETUP_CHECKLIST_STEP_IDS = [
@@ -65,7 +85,8 @@ export function readSetupChecklist(
   orgId: string,
 ): SetupChecklistReadResult {
   const root = (meta ?? {}) as SetupChecklistMeta;
-  const org = readOrgState(root.setup_checklist, orgId);
+  const orgMap = setupChecklistMapFromRecord(root.setup_checklist);
+  const org = readOrgStateFromMap(orgMap, orgId);
   return {
     manual: {
       community: org?.community === true,
@@ -179,9 +200,12 @@ export function patchSetupChecklistMeta(
   }
 
   const storageKey = setupChecklistStorageKey(orgId);
-  const map = { ...(root.setup_checklist ?? {}) };
-  const existing = { ...map[orgId], ...map[storageKey] };
-  map[storageKey] = { ...existing, ...patch };
-  root.setup_checklist = map;
+  const orgMap = setupChecklistMapFromRecord(root.setup_checklist);
+  const existing = {
+    ...orgMap.get(orgId),
+    ...orgMap.get(storageKey),
+  };
+  orgMap.set(storageKey, { ...existing, ...patch });
+  root.setup_checklist = setupChecklistRecordFromMap(orgMap);
   return root;
 }
