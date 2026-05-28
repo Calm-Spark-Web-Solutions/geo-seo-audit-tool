@@ -1,5 +1,32 @@
 /** Per-organization getting-started checklist stored in Supabase user_metadata. */
 
+const SETUP_CHECKLIST_ORG_KEY_PREFIX = "$";
+
+const ORG_ID_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const BLOCKED_ORG_IDS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Safe map key for `setup_checklist` — prefixed so user input cannot target built-in properties. */
+export function setupChecklistStorageKey(orgId: string): string {
+  return `${SETUP_CHECKLIST_ORG_KEY_PREFIX}${orgId.trim()}`;
+}
+
+export function isValidSetupChecklistOrgId(orgId: string): boolean {
+  const trimmed = orgId.trim();
+  if (!trimmed || BLOCKED_ORG_IDS.has(trimmed)) return false;
+  return ORG_ID_UUID_RE.test(trimmed);
+}
+
+function readOrgState(
+  map: Record<string, SetupChecklistOrgState> | undefined,
+  orgId: string,
+): SetupChecklistOrgState | undefined {
+  if (!map) return undefined;
+  const storageKey = setupChecklistStorageKey(orgId);
+  return map[storageKey] ?? map[orgId];
+}
+
 export const SETUP_CHECKLIST_STEP_IDS = [
   "community",
   "scan",
@@ -38,7 +65,7 @@ export function readSetupChecklist(
   orgId: string,
 ): SetupChecklistReadResult {
   const root = (meta ?? {}) as SetupChecklistMeta;
-  const org = root.setup_checklist?.[orgId];
+  const org = readOrgState(root.setup_checklist, orgId);
   return {
     manual: {
       community: org?.community === true,
@@ -147,8 +174,14 @@ export function patchSetupChecklistMeta(
   patch: Partial<SetupChecklistOrgState>,
 ): SetupChecklistMeta {
   const root = { ...((meta ?? {}) as SetupChecklistMeta) };
+  if (!isValidSetupChecklistOrgId(orgId)) {
+    return root;
+  }
+
+  const storageKey = setupChecklistStorageKey(orgId);
   const map = { ...(root.setup_checklist ?? {}) };
-  map[orgId] = { ...map[orgId], ...patch };
+  const existing = { ...map[orgId], ...map[storageKey] };
+  map[storageKey] = { ...existing, ...patch };
   root.setup_checklist = map;
   return root;
 }

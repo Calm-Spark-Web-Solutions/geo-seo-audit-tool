@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 
 import {
+  isValidSetupChecklistOrgId,
   patchSetupChecklistMeta,
+  type SetupChecklistOrgState,
   type SetupChecklistStepId,
 } from "@/lib/onboarding/setup-checklist";
 import { createClient } from "@/lib/supabase/server";
@@ -21,13 +23,39 @@ function isValidStep(step: string): step is SetupChecklistStepId {
   );
 }
 
+function orgIdError(): SetupChecklistActionResult {
+  return { ok: false, error: "Invalid organization id." };
+}
+
+function buildStepPatch(
+  step: SetupChecklistStepId,
+  done: boolean,
+): Partial<SetupChecklistOrgState> {
+  const patch: Partial<SetupChecklistOrgState> = { dismissed: false };
+  switch (step) {
+    case "community":
+      patch.community = done;
+      break;
+    case "scan":
+      patch.scan = done;
+      break;
+    case "google":
+      patch.google = done;
+      break;
+    case "team":
+      patch.team = done;
+      break;
+  }
+  return patch;
+}
+
 export async function setSetupChecklistStep(
   orgId: string,
   step: string,
   done: boolean,
 ): Promise<SetupChecklistActionResult> {
-  if (!orgId?.trim()) {
-    return { ok: false, error: "Organization is required." };
+  if (!isValidSetupChecklistOrgId(orgId)) {
+    return orgIdError();
   }
   if (!isValidStep(step)) {
     return { ok: false, error: "Invalid checklist step." };
@@ -49,10 +77,11 @@ export async function setSetupChecklistStep(
     return { ok: false, error: "You do not have access to this organization." };
   }
 
-  const nextMeta = patchSetupChecklistMeta(user.user_metadata, orgId, {
-    [step]: done,
-    dismissed: false,
-  });
+  const nextMeta = patchSetupChecklistMeta(
+    user.user_metadata,
+    orgId,
+    buildStepPatch(step, done),
+  );
 
   const { error } = await supabase.auth.updateUser({ data: nextMeta });
   if (error) return { ok: false, error: error.message };
@@ -64,8 +93,8 @@ export async function setSetupChecklistStep(
 export async function dismissSetupChecklist(
   orgId: string,
 ): Promise<SetupChecklistActionResult> {
-  if (!orgId?.trim()) {
-    return { ok: false, error: "Organization is required." };
+  if (!isValidSetupChecklistOrgId(orgId)) {
+    return orgIdError();
   }
 
   const supabase = await createClient();
@@ -98,8 +127,8 @@ export async function dismissSetupChecklist(
 export async function reopenSetupChecklist(
   orgId: string,
 ): Promise<SetupChecklistActionResult> {
-  if (!orgId?.trim()) {
-    return { ok: false, error: "Organization is required." };
+  if (!isValidSetupChecklistOrgId(orgId)) {
+    return orgIdError();
   }
 
   const supabase = await createClient();

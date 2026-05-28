@@ -4,11 +4,16 @@ import {
   buildSetupChecklistSteps,
   countRequiredDone,
   isSetupStepDone,
+  isValidSetupChecklistOrgId,
   patchSetupChecklistMeta,
   readSetupChecklist,
+  setupChecklistStorageKey,
   shouldHideSetupChecklist,
   shouldShowReopenLink,
 } from "./setup-checklist";
+
+const ORG_A = "11111111-1111-4111-8111-111111111111";
+const ORG_B = "22222222-2222-4222-8222-222222222222";
 
 const EMPTY_MANUAL = {
   community: false,
@@ -17,21 +22,41 @@ const EMPTY_MANUAL = {
   team: false,
 } as const;
 
+describe("isValidSetupChecklistOrgId", () => {
+  it("accepts UUID org ids", () => {
+    expect(isValidSetupChecklistOrgId(ORG_A)).toBe(true);
+  });
+
+  it("rejects prototype pollution keys", () => {
+    expect(isValidSetupChecklistOrgId("__proto__")).toBe(false);
+    expect(isValidSetupChecklistOrgId("constructor")).toBe(false);
+  });
+});
+
 describe("readSetupChecklist", () => {
-  it("reads per-org manual flags and dismissed", () => {
+  it("reads per-org manual flags and dismissed from prefixed keys", () => {
     const meta = {
       setup_checklist: {
-        org1: { google: true, dismissed: true },
+        [setupChecklistStorageKey(ORG_A)]: { google: true, dismissed: true },
       },
     };
-    expect(readSetupChecklist(meta, "org1")).toEqual({
+    expect(readSetupChecklist(meta, ORG_A)).toEqual({
       manual: { community: false, google: true, scan: false, team: false },
       dismissed: true,
     });
-    expect(readSetupChecklist(meta, "other")).toEqual({
+    expect(readSetupChecklist(meta, ORG_B)).toEqual({
       manual: EMPTY_MANUAL,
       dismissed: false,
     });
+  });
+
+  it("reads legacy unprefixed org keys", () => {
+    const meta = {
+      setup_checklist: {
+        [ORG_A]: { scan: true },
+      },
+    };
+    expect(readSetupChecklist(meta, ORG_A).manual.scan).toBe(true);
   });
 });
 
@@ -138,11 +163,34 @@ describe("shouldShowReopenLink", () => {
 describe("patchSetupChecklistMeta", () => {
   it("merges org state without dropping other orgs", () => {
     const next = patchSetupChecklistMeta(
-      { setup_checklist: { a: { google: true } } },
-      "b",
+      {
+        setup_checklist: {
+          [setupChecklistStorageKey(ORG_A)]: { google: true },
+        },
+      },
+      ORG_B,
       { scan: true },
     );
-    expect(next.setup_checklist?.a?.google).toBe(true);
-    expect(next.setup_checklist?.b?.scan).toBe(true);
+    expect(next.setup_checklist?.[setupChecklistStorageKey(ORG_A)]?.google).toBe(
+      true,
+    );
+    expect(next.setup_checklist?.[setupChecklistStorageKey(ORG_B)]?.scan).toBe(
+      true,
+    );
+  });
+
+  it("does not write when org id is invalid", () => {
+    const meta = { setup_checklist: {} };
+    const next = patchSetupChecklistMeta(meta, "__proto__", { dismissed: true });
+    expect(next.setup_checklist).toEqual({});
+    expect(Object.prototype.hasOwnProperty.call(next.setup_checklist ?? {}, "__proto__")).toBe(
+      false,
+    );
+  });
+
+  it("does not pollute Object.prototype", () => {
+    const next = patchSetupChecklistMeta({}, "__proto__", { google: true });
+    expect(({} as { google?: boolean }).google).toBeUndefined();
+    expect(next.setup_checklist?.["__proto__"]).toBeUndefined();
   });
 });
