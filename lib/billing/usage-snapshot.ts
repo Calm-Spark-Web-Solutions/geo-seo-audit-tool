@@ -1,15 +1,15 @@
 /**
- * Aggregate usage snapshot for the Settings → Billing page. Returns the
- * caps and the actual usage so the UI can render meters without each
- * component re-querying.
+ * Aggregate usage snapshot for the Usage page. Returns caps and actual usage
+ * so the UI can render meters without each component re-querying.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { getAuditQuotaSnapshot, type AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
+import { getAuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import {
   loadBillingContext,
-  loadCommunityIdsForUser,
+  loadCommunityIdsForCompany,
+  userIsMemberOfCompany,
   type BillingContext,
 } from "@/lib/billing/billing-context";
 import {
@@ -17,6 +17,7 @@ import {
   type CommunityQuotaSnapshot,
 } from "@/lib/billing/community-quota";
 import { effectiveMonthlyNewPagesCap } from "@/lib/billing/plan-limits";
+import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 
 export interface CommunityRosterUsage {
   communityId: string;
@@ -32,7 +33,14 @@ export interface BillingUsageSnapshot {
   audits: AuditQuotaSnapshot;
   community: CommunityQuotaSnapshot;
   perCommunity: CommunityRosterUsage[];
+  organizationId: string;
+  organizationName: string;
 }
+
+export type LoadBillingUsageSnapshotOptions = {
+  companyId: string;
+  companyName: string;
+};
 
 function utcMonthStartIso(now = new Date()): string {
   const y = now.getUTCFullYear();
@@ -43,30 +51,34 @@ function utcMonthStartIso(now = new Date()): string {
 export async function loadBillingUsageSnapshot(
   supabase: SupabaseClient,
   userId: string,
-): Promise<BillingUsageSnapshot> {
-  const context = await loadBillingContext(supabase, userId);
-  const audits = await getAuditQuotaSnapshot(supabase, userId);
+  options: LoadBillingUsageSnapshotOptions,
+): Promise<BillingUsageSnapshot | null> {
+  const { companyId, companyName } = options;
 
-  const communityIds = await loadCommunityIdsForUser(
-    supabase,
-    context.companyIds,
-  );
+  const isMember = await userIsMemberOfCompany(supabase, userId, companyId);
+  if (!isMember) return null;
+
+  const context = await loadBillingContext(supabase, userId);
+  const audits = await getAuditQuotaSnapshot(supabase, userId, { companyId });
+
+  const communityIds = await loadCommunityIdsForCompany(supabase, companyId);
 
   const { data: communityRows } = communityIds.length
     ? await supabase
         .from("communities")
         .select("id, name")
         .in("id", communityIds)
+        .order("name", { ascending: true })
     : { data: [] as { id: string; name: string }[] };
 
-  const community = communityQuotaFromContext(context, communityIds.length);
+  const community = communityQuotaFromContext(
+    context,
+    communityIds.length,
+  );
 
   const monthStart = utcMonthStartIso();
   const perCommunity: CommunityRosterUsage[] = [];
 
-  // Sequential to keep query budget bounded for portfolios with 100+
-  // communities. The Settings page is server-rendered with caching, and
-  // most accounts will have <= a few rows here.
   for (const row of communityRows ?? []) {
     const [{ count: rosterUsed }, { count: newAddedThisMonth }] =
       await Promise.all([
@@ -87,8 +99,6 @@ export async function loadBillingUsageSnapshot(
       rosterUsed: rosterUsed ?? 0,
       rosterCap: context.unlimited ? null : context.limits.pagesPerCommunity,
       newAddedThisMonth: newAddedThisMonth ?? 0,
-      // Effective cap = base + Page Pack bonus, so the meter reflects what
-      // the customer actually purchased.
       newMonthlyCap: context.unlimited
         ? null
         : effectiveMonthlyNewPagesCap(context.limits),
@@ -100,5 +110,7 @@ export async function loadBillingUsageSnapshot(
     audits,
     community,
     perCommunity,
+    organizationId: companyId,
+    organizationName: companyName,
   };
 }

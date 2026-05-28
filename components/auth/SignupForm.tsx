@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useActionState } from "react";
 
-import { signUp, type AuthFormState } from "@/app/(auth)/actions";
+import {
+  resendSignupConfirmation,
+  signUp,
+  type AuthFormState,
+} from "@/app/(auth)/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +16,10 @@ const initialState: AuthFormState = { ok: true };
 
 export function SignupForm({ next }: { next?: string | null }) {
   const [state, formAction, pending] = useActionState(signUp, initialState);
+  const [resendState, resendAction, resending] = useActionState(
+    resendSignupConfirmation,
+    initialState,
+  );
 
   if (state.sent) {
     return (
@@ -22,10 +30,36 @@ export function SignupForm({ next }: { next?: string | null }) {
           Click the link in your inbox to finish creating your account.
         </p>
         <p className="text-xs text-muted-foreground">
-          Didn&apos;t get it? Check your spam folder, or try again with a
-          different email.
+          Didn&apos;t get it? Check your spam folder, or resend the link
+          below.
         </p>
-        <Button variant="outline" asChild>
+        <form action={resendAction}>
+          <input
+            type="hidden"
+            name="email"
+            value={state.email ?? ""}
+          />
+          <Button type="submit" variant="outline" disabled={resending}>
+            {resending
+              ? "Sending…"
+              : resendState.sent
+                ? "Sent — check your inbox"
+                : "Resend confirmation email"}
+          </Button>
+        </form>
+        <p className="text-xs text-muted-foreground">
+          Already confirmed?{" "}
+          <Link
+            href={
+              next ? `/login?next=${encodeURIComponent(next)}` : "/login"
+            }
+            className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
+          >
+            Sign in
+          </Link>
+          .
+        </p>
+        <Button variant="ghost" asChild>
           <Link href="/login">Back to sign in</Link>
         </Button>
       </div>

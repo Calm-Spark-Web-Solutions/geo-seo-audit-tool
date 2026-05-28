@@ -7,7 +7,6 @@ import { crawlSite } from "@/lib/crawler/crawl";
 import {
   fetchAllHtmlForAudit,
   PAGE_FETCH_TIMEOUT_MS,
-  type PageWork,
 } from "@/lib/crawler/fetch-pages";
 import {
   DEFAULT_USER_AGENT,
@@ -15,7 +14,6 @@ import {
   normalizeUrl,
   sameAuditSiteOrigin,
 } from "@/lib/crawler/normalize";
-import type { AuditFetchFailure } from "@/types";
 import {
   buildUrlToSitemapCategoryLabelMap,
   fetchSitemap,
@@ -270,7 +268,7 @@ export async function runAudit({
   });
   const googleChecksPromise =
     communityId != null
-      ? runGoogleFieldChecks(supabase, communityId, base).catch(() => ({
+      ? runGoogleFieldChecks(supabase, communityId).catch(() => ({
           checks: [] as AuditCheck[],
           metrics: null,
         }))

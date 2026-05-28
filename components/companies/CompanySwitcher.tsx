@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import { useParams, usePathname } from "next/navigation";
 import { ChevronsUpDown, Plus } from "lucide-react";
 
@@ -28,6 +28,13 @@ export function CompanySwitcher({
   const params = useParams<{ id?: string | string[] }>();
   const pathname = usePathname();
   const detailsRef = useRef<HTMLDetailsElement>(null);
+  const menuId = useId();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPath, setMenuPath] = useState(pathname);
+  if (pathname !== menuPath) {
+    setMenuPath(pathname);
+    setMenuOpen(false);
+  }
 
   const selectedId = selectedOrganizationId(
     companies,
@@ -39,13 +46,14 @@ export function CompanySwitcher({
     ? companies.find((c) => c.id === selectedId) ?? null
     : null;
 
-  useEffect(() => {
-    detailsRef.current?.removeAttribute("open");
-  }, [pathname]);
-
   return (
     <div className="relative">
-      <details ref={detailsRef} className="group">
+      <details
+        key={pathname}
+        ref={detailsRef}
+        className="group"
+        onToggle={(e) => setMenuOpen(e.currentTarget.open)}
+      >
         <summary
           className={cn(
             "flex cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-card px-2 py-2 text-left shadow-sm transition-colors",
@@ -54,6 +62,9 @@ export function CompanySwitcher({
             collapsed && "justify-center px-1.5",
           )}
           title={collapsed ? "Switch organization" : undefined}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-controls={menuId}
         >
           {selected ? (
             <>
@@ -96,6 +107,8 @@ export function CompanySwitcher({
         </summary>
 
         <div
+          id={menuId}
+          role="menu"
           className={cn(
             "absolute z-[60] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg",
             collapsed

@@ -1,10 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { Gauge } from "lucide-react";
 
 import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import { UserMenu } from "@/components/layout/UserMenu";
-import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { cn } from "@/lib/utils";
 
 /** Hover / screen-reader context: matches getAuditQuotaSnapshot counting rules. */
@@ -17,12 +17,17 @@ export function SidebarAccountSection({
   fullName,
   avatarUrl,
   collapsed,
+  usageHref = "/usage",
+  hideUserMenu = false,
 }: {
   quota: AuditQuotaSnapshot;
   email: string | null;
   fullName?: string | null;
   avatarUrl?: string | null;
   collapsed?: boolean;
+  usageHref?: string;
+  /** Mobile drawer: account actions live in the topbar UserMenu only. */
+  hideUserMenu?: boolean;
 }) {
   const effectiveQuota: AuditQuotaSnapshot =
     quota.kind === "limited" && quota.limit <= 0
@@ -31,28 +36,33 @@ export function SidebarAccountSection({
 
   const quotaLine =
     effectiveQuota.kind === "unlimited" ? (
-      <p
-        className={cn(
-          "text-xs leading-snug text-muted-foreground",
-          collapsed && "sr-only",
-        )}
-        title={
-          collapsed
-            ? "Monthly visibility scans: unlimited (dev or billing bypass)"
-            : undefined
-        }
-      >
-        {collapsed ? null : "Unlimited scans this month"}
-      </p>
+      collapsed ? (
+        <Link
+          href={usageHref}
+          className="flex justify-center rounded-md p-1 text-muted-foreground hover:bg-muted/80"
+          title="Unlimited scans this month — view usage"
+        >
+          <Gauge className="h-4 w-4" aria-hidden />
+        </Link>
+      ) : (
+        <Link
+          href={usageHref}
+          className="block rounded-md px-1 py-0.5 text-xs leading-snug text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+          title="View usage"
+        >
+          Unlimited scans this month
+        </Link>
+      )
     ) : (
-      <div
+      <Link
+        href={usageHref}
         className={cn(
-          "flex items-start gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-2",
-          collapsed && "justify-center border-0 bg-transparent p-0",
+          "flex items-start gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-2 transition-colors hover:bg-muted/50",
+          collapsed && "justify-center border-0 bg-transparent p-1",
         )}
         title={
           collapsed
-            ? `${effectiveQuota.remaining} of ${effectiveQuota.limit} scans left — ${effectiveQuota.periodLabel}. ${LIMITED_QUOTA_TITLE}`
+            ? `${effectiveQuota.remaining} of ${effectiveQuota.limit} scans left — view usage`
             : LIMITED_QUOTA_TITLE
         }
       >
@@ -72,11 +82,11 @@ export function SidebarAccountSection({
               {effectiveQuota.periodLabel} · {effectiveQuota.used} used
             </p>
             <p className="text-[10px] leading-snug text-muted-foreground/90">
-              Every started scan counts · all organizations on your account
+              Tap for full usage · all organizations on your account
             </p>
           </div>
         ) : null}
-      </div>
+      </Link>
     );
 
   return (
@@ -87,13 +97,7 @@ export function SidebarAccountSection({
       )}
     >
       {quotaLine}
-      <div
-        className={cn(
-          "flex w-full items-center gap-2",
-          collapsed ? "flex-col items-center" : "min-w-0 justify-end",
-        )}
-      >
-        <ThemeToggle compact={collapsed} />
+      {hideUserMenu ? null : (
         <UserMenu
           email={email}
           fullName={fullName}
@@ -101,7 +105,7 @@ export function SidebarAccountSection({
           placement="sidebar"
           compact={collapsed}
         />
-      </div>
+      )}
     </div>
   );
 }

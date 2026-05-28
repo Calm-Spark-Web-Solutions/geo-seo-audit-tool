@@ -9,6 +9,8 @@ import {
 } from "@/lib/billing/community-quota";
 import { consumeRateLimit } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
+import { loadManualGoogleCoverageForCommunity } from "@/lib/checklists/load-manual-google-coverage";
+import { isManualItemReplacedByGoogle } from "@/lib/checklists/manual-google-coverage";
 import {
   ALLOWED_COMMUNITY_MANUAL_KEYS,
   sanitizeCommunityManualResults,
@@ -45,11 +47,19 @@ export async function saveCommunityManualChecklist(
     return { ok: false, error: readErr?.message ?? "Community not found." };
   }
 
+  const coverage = await loadManualGoogleCoverageForCommunity(
+    supabase,
+    communityId,
+  );
+
   const prev =
     (existing.manual_check_results as CommunityManualResults | null) ?? {};
   const merged: CommunityManualResults = { ...prev, ...parsed.data };
   for (const k of Object.keys(merged)) {
     if (!ALLOWED_COMMUNITY_MANUAL_KEYS.has(k)) {
+      delete merged[k];
+    }
+    if (isManualItemReplacedByGoogle(k, coverage)) {
       delete merged[k];
     }
   }

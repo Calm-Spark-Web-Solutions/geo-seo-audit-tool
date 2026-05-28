@@ -66,6 +66,10 @@ const nextConfig: NextConfig = {
     ];
   },
 
+  // Backward-compat redirects for the old `audit` URL family. Internal links
+  // were migrated to /visibility-scans/* — these only catch external inbound
+  // traffic (bookmarks, emails, partner sites). Review analytics ~30 days
+  // after launch; if zero hits, this block can be deleted.
   async redirects() {
     return [
       {

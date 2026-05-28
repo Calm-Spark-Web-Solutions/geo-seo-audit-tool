@@ -50,11 +50,6 @@ const ENV_KEY: Record<CheckoutPriceKey, string> = {
   runs_pack_yearly: "STRIPE_PRICE_RUNS_PACK_YEARLY",
 };
 
-/** Resolve env var name for a checkout key (for error messages). */
-export function envVarForPriceKey(key: CheckoutPriceKey): string {
-  return ENV_KEY[key];
-}
-
 export function getStripePriceId(key: CheckoutPriceKey): string | null {
   const name = ENV_KEY[key];
   const raw = process.env[name]?.trim();

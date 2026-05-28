@@ -134,10 +134,12 @@ export async function SettingsOrganizationsSection() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold tracking-tight">Organizations</h2>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Your organizations
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Quick links to organizations you belong to. For the full directory and
-            filters, use the{" "}
+            Organizations you belong to and your role in each. The full
+            directory lives on the{" "}
             <Link
               href="/companies"
               className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
@@ -191,22 +193,22 @@ export async function SettingsOrganizationsSection() {
                             </>
                           ) : null}
                           {" · "}
-                          <a
-                            href={`/companies/${o.id}#google-integrations`}
+                          <Link
+                            href={`/integrations/google?org=${encodeURIComponent(o.id)}`}
                             className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
                           >
                             Manage properties
-                          </a>
+                          </Link>
                         </>
                       ) : (
                         <>
                           Not connected ·{" "}
-                          <a
-                            href={`/api/integrations/google/connect?company_id=${encodeURIComponent(o.id)}&return_to=${encodeURIComponent(`/companies/${o.id}`)}`}
+                          <Link
+                            href={`/integrations/google?org=${encodeURIComponent(o.id)}`}
                             className="font-medium text-foreground underline underline-offset-4 hover:no-underline"
                           >
-                            Connect Google
-                          </a>
+                            Set up Google
+                          </Link>
                         </>
                       )}
                     </p>
@@ -216,9 +218,11 @@ export async function SettingsOrganizationsSection() {
                   <Button variant="secondary" size="sm" asChild>
                     <Link href={`/companies/${o.id}`}>Open organization</Link>
                   </Button>
-                  {o.canEdit && o.googleConnected ? (
+                  {o.canEdit ? (
                     <Button variant="outline" size="sm" asChild>
-                      <a href={`/companies/${o.id}#google-integrations`}>Google setup</a>
+                      <Link href={`/integrations/google?org=${encodeURIComponent(o.id)}`}>
+                        {o.googleConnected ? "Google setup" : "Set up Google"}
+                      </Link>
                     </Button>
                   ) : null}
                   {o.canEdit ? (

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ColorModeSegmented } from "@/components/theme/ColorModeSegmented";
 
 type Props = {
   email: string;
@@ -78,6 +79,15 @@ export function ProfileSettingsSection({
               autoComplete="name"
               placeholder="Your name"
             />
+          </div>
+          <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Color mode</p>
+              <p className="text-xs text-muted-foreground">
+                Light or dark appearance for the dashboard.
+              </p>
+            </div>
+            <ColorModeSegmented />
           </div>
           <Button type="submit" disabled={pending}>
             {pending ? "Saving…" : "Save profile"}

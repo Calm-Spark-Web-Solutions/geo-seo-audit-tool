@@ -45,42 +45,78 @@ function Meter({
   );
 }
 
+function auditsSummaryLine(
+  audits: BillingUsageSnapshot["audits"],
+  organizationName: string,
+): { primary: string; footnote: string | null } {
+  if (audits.kind === "unlimited") {
+    return {
+      primary: "Unlimited visibility scans this month",
+      footnote: null,
+    };
+  }
+  return {
+    primary: `Your plan allows ${audits.limit.toLocaleString()} scans/month for your whole account. ${organizationName} has used ${audits.used.toLocaleString()} this month.`,
+    footnote: `Month: ${audits.periodLabel}`,
+  };
+}
+
+function communitySummaryLine(
+  community: BillingUsageSnapshot["community"],
+  organizationName: string,
+): { primary: string; footnote: string | null } {
+  if (community.kind === "unlimited") {
+    return {
+      primary: `${community.used.toLocaleString()} communit${community.used === 1 ? "y" : "ies"} in ${organizationName}`,
+      footnote: "Unlimited communities on your plan",
+    };
+  }
+  return {
+    primary: `${community.used.toLocaleString()} communit${community.used === 1 ? "y" : "ies"} in ${organizationName}`,
+    footnote: `${community.limit.toLocaleString()} allowed on your account`,
+  };
+}
+
 export function BillingUsageCard({ snapshot }: { snapshot: BillingUsageSnapshot }) {
-  const { context, audits, community, perCommunity } = snapshot;
+  const { context, audits, community, perCommunity, organizationName } =
+    snapshot;
 
-  const auditsLine =
-    audits.kind === "unlimited"
-      ? "Unlimited manual audit runs this month"
-      : `${audits.used.toLocaleString()} / ${audits.limit.toLocaleString()} manual audit runs (${audits.periodLabel})`;
-
-  const communityLine =
-    community.kind === "unlimited"
-      ? `${community.used.toLocaleString()} communities · unlimited on your plan`
-      : `${community.used.toLocaleString()} / ${community.limit.toLocaleString()} communities`;
+  const auditsCopy = auditsSummaryLine(audits, organizationName);
+  const communityCopy = communitySummaryLine(community, organizationName);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Usage</CardTitle>
+        <CardTitle className="text-base">Usage for {organizationName}</CardTitle>
         <CardDescription>
           {context.unlimited
-            ? "Billing enforcement is disabled in this environment."
-            : "Rescans of already-tracked URLs are always free. New URLs count toward your monthly new-page allowance and each community's roster cap."}
+            ? "Billing isn't enforced for this account."
+            : "Rescanning a page you already track is always free. Only adding new pages counts against your monthly allowance."}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-md border border-border p-3">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Manual audit runs
+              Visibility scans
             </p>
-            <p className="mt-1">{auditsLine}</p>
+            <p className="mt-1">{auditsCopy.primary}</p>
+            {auditsCopy.footnote ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {auditsCopy.footnote}
+              </p>
+            ) : null}
           </div>
           <div className="rounded-md border border-border p-3">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Communities
             </p>
-            <p className="mt-1">{communityLine}</p>
+            <p className="mt-1">{communityCopy.primary}</p>
+            {communityCopy.footnote ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {communityCopy.footnote}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -109,7 +145,8 @@ export function BillingUsageCard({ snapshot }: { snapshot: BillingUsageSnapshot 
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Add a community to start tracking page roster usage.
+            No communities in this organization yet. Add one from the company
+            page to start tracking page roster usage.
           </p>
         )}
       </CardContent>

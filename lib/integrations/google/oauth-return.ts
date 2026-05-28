@@ -1,4 +1,8 @@
-/** Validate OAuth return path: must be the same company detail page. */
+/**
+ * Validate OAuth return path. Only `/integrations/google?org=<companyId>` is
+ * supported now; the legacy `/companies/<id>#google-integrations` branch has
+ * been removed because that anchor no longer exists on the company page.
+ */
 export function normalizeOAuthReturnTo(
   returnTo: string | null | undefined,
   companyId: string,
@@ -6,8 +10,14 @@ export function normalizeOAuthReturnTo(
   if (!returnTo?.trim()) return null;
   const trimmed = returnTo.trim();
   const pathOnly = trimmed.split("?")[0]?.split("#")[0] ?? "";
-  const expected = `/companies/${companyId}`;
-  if (pathOnly !== expected) return null;
+  if (pathOnly !== "/integrations/google") return null;
+  try {
+    const u = new URL(trimmed, "http://local");
+    const org = u.searchParams.get("org");
+    if (org && org !== companyId) return null;
+  } catch {
+    return null;
+  }
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
@@ -15,12 +25,10 @@ export function oauthSuccessReturnPath(
   returnTo: string | null,
   companyId: string,
 ): string {
-  const base = normalizeOAuthReturnTo(returnTo, companyId);
-  if (base) {
-    const path = base.split("?")[0] ?? base;
-    return `${path}?google=connected#google-integrations`;
-  }
-  return "/settings?tab=organizations&google=connected";
+  // Always return to the canonical integrations hub. The success flash is
+  // rendered from the `google=connected` query param.
+  void normalizeOAuthReturnTo(returnTo, companyId);
+  return `/integrations/google?org=${encodeURIComponent(companyId)}&google=connected`;
 }
 
 export function oauthErrorReturnPath(
@@ -28,11 +36,7 @@ export function oauthErrorReturnPath(
   companyId: string,
   reason: string,
 ): string {
-  const base = normalizeOAuthReturnTo(returnTo, companyId);
+  void normalizeOAuthReturnTo(returnTo, companyId);
   const q = `google=error&reason=${encodeURIComponent(reason)}`;
-  if (base) {
-    const path = base.split("?")[0] ?? base;
-    return `${path}?${q}#google-integrations`;
-  }
-  return `/settings?tab=organizations&${q}`;
+  return `/integrations/google?org=${encodeURIComponent(companyId)}&${q}`;
 }

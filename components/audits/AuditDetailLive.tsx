@@ -17,10 +17,28 @@ import { PartialCrawlBanner } from "@/components/audits/PartialCrawlBanner";
 import { PsiCoveragePanel } from "@/components/audits/PsiCoveragePanel";
 import type { RemoveAuditPageSuccess } from "@/app/(dashboard)/visibility-scans/[id]/pages/[pageId]/actions";
 import { GoogleMetricsCard } from "@/components/communities/GoogleMetricsCard";
+import { AiAssistantTrafficCard } from "@/components/integrations/AiAssistantTrafficCard";
+import { SearchQueriesTable } from "@/components/integrations/SearchQueriesTable";
+import { TopPagesTable } from "@/components/integrations/TopPagesTable";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { isPartialCrawl, partialCrawlFailedCount } from "@/lib/audit/partial-crawl";
 import { psiCoverageFromPages } from "@/lib/audit/psi-keys";
-import type { Audit, AuditCheck, AuditPage, AuditQueueDiagnostics } from "@/types";
+import {
+  GEO_SECTION_DESCRIPTION,
+  GEO_SECTION_TITLE,
+  HOW_TO_READ_AUDIT,
+  SEARCH_TRAFFIC_SECTION_DESCRIPTION,
+  SEARCH_TRAFFIC_SECTION_TITLE,
+  SEO_SECTION_DESCRIPTION,
+  SEO_SECTION_TITLE,
+} from "@/lib/audit/reader-copy";
+import type {
+  Audit,
+  AuditCheck,
+  AuditPage,
+  AuditQueueDiagnostics,
+  CommunityGoogleMetricsSnapshot,
+} from "@/types";
 import { categoryLabelSortKey } from "@/lib/crawler/shard-labels";
 
 export type PriorPageSnapshot = {
@@ -79,11 +97,18 @@ export function AuditDetailLive({
   initialPages,
   priorByUrl,
   initialQueue,
+  googleSnapshot,
 }: {
   initialAudit: Audit;
   initialPages: AuditPage[];
   priorByUrl?: Record<string, PriorPageSnapshot>;
   initialQueue?: AuditQueueDiagnostics | null;
+  /**
+   * Latest `community_google_metrics_snapshots` row for the audit's community.
+   * Carries top queries, top pages, and AI assistant referral breakdowns
+   * persisted at scan completion or daily-sync time.
+   */
+  googleSnapshot?: CommunityGoogleMetricsSnapshot | null;
 }) {
   const [audit, setAudit] = useState<Audit>(initialAudit);
   const [pages, setPages] = useState<AuditPage[]>(initialPages);
@@ -266,6 +291,23 @@ export function AuditDetailLive({
     <div className="flex flex-col gap-4">
       <AuditScoreCard audit={audit} queue={queue} />
 
+      <details className="rounded-md border border-border bg-muted/20">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-foreground">
+          Understanding your scan
+        </summary>
+        <div className="space-y-3 border-t border-border px-3 pb-3 pt-3 text-sm text-muted-foreground">
+          <div>
+            <p className="font-medium text-foreground">{SEO_SECTION_TITLE}</p>
+            <p>{SEO_SECTION_DESCRIPTION}</p>
+          </div>
+          <div>
+            <p className="font-medium text-foreground">{GEO_SECTION_TITLE}</p>
+            <p>{GEO_SECTION_DESCRIPTION}</p>
+          </div>
+          <p>{HOW_TO_READ_AUDIT}</p>
+        </div>
+      </details>
+
       {showGoogleMetricsCard ? (
         <GoogleMetricsCard
           metrics={audit.google_metrics ?? null}
@@ -273,6 +315,35 @@ export function AuditDetailLive({
           variant="audit"
           asOf={audit.created_at}
         />
+      ) : null}
+
+      {googleSnapshot &&
+      (googleSnapshot.gsc_top_queries?.length ||
+        googleSnapshot.gsc_top_pages?.length ||
+        googleSnapshot.ga4_ai_referrals?.length ||
+        gscMapped ||
+        ga4Mapped) ? (
+        <AuditSection
+          title={SEARCH_TRAFFIC_SECTION_TITLE}
+          description={SEARCH_TRAFFIC_SECTION_DESCRIPTION}
+          defaultOpen={false}
+        >
+          <div className="flex flex-col gap-4">
+            {gscMapped ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                <SearchQueriesTable
+                  rows={googleSnapshot.gsc_top_queries ?? null}
+                />
+                <TopPagesTable rows={googleSnapshot.gsc_top_pages ?? null} />
+              </div>
+            ) : null}
+            {ga4Mapped ? (
+              <AiAssistantTrafficCard
+                referrals={googleSnapshot.ga4_ai_referrals ?? null}
+              />
+            ) : null}
+          </div>
+        </AuditSection>
       ) : null}
 
       {partialCrawl ? (

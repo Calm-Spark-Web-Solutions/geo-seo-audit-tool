@@ -11,6 +11,15 @@ export const GEO_SECTION_DESCRIPTION =
 export const HOW_TO_READ_AUDIT =
   "Each line is a single check on this page snapshot. Pass means we did not flag an issue. Warning means something to review or improve. Fail means we recommend fixing it when you can.";
 
+/**
+ * Headline + blurb for the audit-detail "Search traffic detail" expander,
+ * which combines top GSC queries, top GSC landing pages, and AI assistant
+ * referrer traffic from GA4 in one section.
+ */
+export const SEARCH_TRAFFIC_SECTION_TITLE = "Search traffic detail";
+export const SEARCH_TRAFFIC_SECTION_DESCRIPTION =
+  "What people searched to find this community, which pages of yours they landed on, and how many visits came from AI assistants like ChatGPT, Perplexity, Gemini, or Copilot. All numbers cover the last 28 days.";
+
 /** Shown while a visibility scan is queued or crawling/scoring URLs. */
 export const AUDIT_RUNNING_EXPECTATION =
   "Visibility scans analyze each URL with crawlers, PageSpeed, and optional AI scoring. This can take several minutes — larger page counts take longer.";

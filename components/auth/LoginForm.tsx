@@ -45,6 +45,12 @@ export function LoginForm({ next }: { next?: string | null }) {
           required
           maxLength={200}
         />
+        <Link
+          href="/forgot-password"
+          className="self-end text-xs text-muted-foreground hover:text-foreground hover:underline"
+        >
+          Forgot password?
+        </Link>
       </Field>
 
       {state.error && !state.fieldErrors ? (

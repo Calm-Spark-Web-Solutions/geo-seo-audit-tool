@@ -2,9 +2,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Building, Plus, SearchX } from "lucide-react";
 
-import { CompanyGoogleIntegrationsPanel } from "@/components/integrations/CompanyGoogleIntegrationsPanel";
+import { CompanyGoogleSetupBanner } from "@/components/integrations/CompanyGoogleSetupBanner";
 import { OrgContextSync } from "@/components/companies/OrgContextSync";
-import { isGoogleOAuthConfigured } from "@/lib/integrations/google/config";
 import { googleMappingStatus } from "@/lib/integrations/google/google-properties-ui";
 import { CommunityDirectorySearch } from "@/components/communities/CommunityDirectorySearch";
 import { CommunityListPagination } from "@/components/communities/CommunityListPagination";
@@ -35,13 +34,6 @@ export default async function CompanyDetailPage({
 
   const qRaw = typeof sp.q === "string" ? sp.q : "";
   const q = normalizeCommunitySearch(qRaw);
-  const googleFlash =
-    typeof sp.google === "string"
-      ? sp.google
-      : Array.isArray(sp.google)
-        ? sp.google[0]
-        : undefined;
-  const showGoogleConnectedFlash = googleFlash === "connected";
   const parsedPage =
     typeof sp.page === "string" ? Number.parseInt(sp.page, 10) : NaN;
   const pageRequested =
@@ -49,11 +41,16 @@ export default async function CompanyDetailPage({
 
   const supabase = await createClient();
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const [
     { data: company, error: companyError },
     { count: portfolioCount },
     { data: googleConn },
     { data: allCommunitiesForGoogle },
+    { data: memberRow },
   ] = await Promise.all([
     supabase
       .from("companies")
@@ -74,7 +71,18 @@ export default async function CompanyDetailPage({
       .select("id, name, website_url")
       .eq("company_id", id)
       .order("name", { ascending: true }),
+    user
+      ? supabase
+          .from("company_members")
+          .select("role")
+          .eq("company_id", id)
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
+
+  const currentUserRole = (memberRow?.role as string | undefined) ?? null;
+  const canDeleteOrganization = currentUserRole === "owner";
 
   const communityIdsForGoogle = (allCommunitiesForGoogle ?? []).map(
     (c) => c.id as string,
@@ -240,24 +248,20 @@ export default async function CompanyDetailPage({
             <Button variant="outline" asChild>
               <Link href={`/companies/${typedCompany.id}/edit`}>Edit</Link>
             </Button>
-            <DeleteCompanyButton
-              companyId={typedCompany.id}
-              companyName={typedCompany.name}
-            />
+            {canDeleteOrganization ? (
+              <DeleteCompanyButton
+                companyId={typedCompany.id}
+                companyName={typedCompany.name}
+              />
+            ) : null}
           </>
         }
       />
 
-      <CompanyGoogleIntegrationsPanel
+      <CompanyGoogleSetupBanner
         companyId={typedCompany.id}
-        companyName={typedCompany.name}
         googleConnected={Boolean(googleConn)}
-        googleAccountEmail={
-          (googleConn?.google_account_email as string | null) ?? null
-        }
         communities={googleCommunityRows}
-        oauthConfigured={isGoogleOAuthConfigured()}
-        showConnectedFlash={showGoogleConnectedFlash}
       />
 
       <div className="flex flex-col gap-4">
@@ -275,7 +279,7 @@ export default async function CompanyDetailPage({
                   <span className="font-medium tabular-nums text-foreground">{filteredTotal}</span>{" "}
                   matching
                   {" · "}
-                  <span className="tabular-nums">{totalPortfolio}</span> total in this company
+                  <span className="tabular-nums">{totalPortfolio}</span> total in this organization
                 </>
               )}
             </p>
@@ -296,7 +300,7 @@ export default async function CompanyDetailPage({
           <EmptyState
             icon={Building}
             title="No communities yet"
-            description="Add the first community website to begin running audits."
+            description="Add the first community website to begin running visibility scans."
             actions={
               <Button asChild>
                 <Link href={`/companies/${typedCompany.id}/new-community`}>

@@ -3,16 +3,12 @@
 import { redirect } from "next/navigation";
 import type Stripe from "stripe";
 
+import { parsePlanBuilderForm } from "@/lib/billing/plan-builder-form";
+import { getStripePriceId } from "@/lib/billing/price-map";
 import {
-  COMMUNITY_QUANTITY_HARD_MAX,
-  COMMUNITY_QUANTITY_HARD_MIN,
-  maxAddonPacksPerCommunity,
-} from "@/lib/billing/plan-limits";
-import {
-  getStripePriceId,
-  isCheckoutPriceKey,
-  isCheckoutTierPriceKey,
-} from "@/lib/billing/price-map";
+  buildSubscriptionUpdateItems,
+  toStripeSubscriptionUpdateItems,
+} from "@/lib/billing/stripe-subscription-update";
 import { createClient } from "@/lib/supabase/server";
 import { getStripe, isStripeConfigured } from "@/lib/stripe/server";
 
@@ -22,30 +18,21 @@ function baseSiteUrl(): string {
   return raw.replace(/\/$/, "");
 }
 
-function parseInteger(
-  raw: FormDataEntryValue | null,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  if (typeof raw !== "string") return fallback;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || Number.isNaN(n)) return fallback;
-  if (n < min) return min;
-  if (n > max) return max;
-  return n;
-}
-
 // A subscription in one of these states is "live" enough that creating a
 // second Checkout session would result in a duplicate Stripe subscription
-// (and a duplicate charge on next renewal). Route those clicks through the
-// Customer Portal so quantity / tier / Page Pack changes apply to the
-// existing subscription with Stripe-managed proration.
-const PORTAL_GATE_STATUSES: ReadonlySet<string> = new Set([
+// (and a duplicate charge on next renewal). Route those clicks through plan
+// updates or the Customer Portal instead.
+export const PORTAL_GATE_STATUSES: ReadonlySet<string> = new Set([
   "active",
   "trialing",
   "past_due",
 ]);
+
+const STRIPE_LIVE_STATUSES: Stripe.SubscriptionListParams.Status[] = [
+  "active",
+  "trialing",
+  "past_due",
+];
 
 async function redirectToCustomerPortal(
   stripe: Stripe,
@@ -54,74 +41,43 @@ async function redirectToCustomerPortal(
 ): Promise<never> {
   const session = await stripe.billingPortal.sessions.create({
     customer: customerId,
-    return_url: `${site}/settings`,
+    return_url: `${site}/settings?tab=billing`,
   });
   if (!session.url) {
-    redirect("/settings?billing=error");
+    redirect("/settings?tab=billing&billing=error");
   }
   redirect(session.url);
 }
 
-export async function startCheckoutSession(formData: FormData) {
-  const rawKey = formData.get("priceKey");
-  const priceKey =
-    typeof rawKey === "string" && isCheckoutPriceKey(rawKey) ? rawKey : null;
-  if (!priceKey) {
-    redirect("/settings?billing=invalid");
+async function customerHasLiveStripeSubscription(
+  stripe: Stripe,
+  customerId: string,
+): Promise<boolean> {
+  for (const status of STRIPE_LIVE_STATUSES) {
+    const page = await stripe.subscriptions.list({
+      customer: customerId,
+      status,
+      limit: 1,
+    });
+    if (page.data.length > 0) return true;
   }
-  // The checkout entry point is always a tier price (the Page Pack add-on
-  // attaches as a second line item). Reject add-on slugs to avoid creating
-  // a subscription that has only the bonus and no tier.
-  if (!isCheckoutTierPriceKey(priceKey)) {
-    redirect("/settings?billing=invalid");
+  return false;
+}
+
+export async function startCheckoutSession(formData: FormData) {
+  const parsed = parsePlanBuilderForm(formData);
+  if (!parsed.ok) {
+    redirect(`/settings?tab=billing&billing=${parsed.error}`);
   }
 
   if (!isStripeConfigured()) {
-    redirect("/settings?billing=unconfigured");
+    redirect("/settings?tab=billing&billing=unconfigured");
   }
 
-  const priceId = getStripePriceId(priceKey);
-  if (!priceId) {
-    redirect("/settings?billing=missing_price");
+  const tierStripePriceId = getStripePriceId(parsed.tierPriceKey);
+  if (!tierStripePriceId) {
+    redirect("/settings?tab=billing&billing=missing_price");
   }
-
-  // Partner / single-seat SKUs ignore quantity; all other tiers take a
-  // community count and bill `unit_amount × quantity` via Stripe seats.
-  const quantity =
-    priceKey === "partner_monthly"
-      ? 1
-      : parseInteger(
-          formData.get("quantity"),
-          COMMUNITY_QUANTITY_HARD_MIN,
-          COMMUNITY_QUANTITY_HARD_MAX,
-          1,
-        );
-
-  const maxPacks = maxAddonPacksPerCommunity(priceKey);
-
-  // Optional Page Pack add-on. `pagesPackQuantity` is **packs per community**;
-  // Stripe's `line_items[].quantity` for the pack price is
-  // `packsPerCommunity × communities`, since each unit on the Stripe Price
-  // is `unit_amount` for "+1 pack on +1 community".
-  const packsUpper =
-    maxPacks === null ? 9_999 : maxPacks;
-  const packsPerCommunity = parseInteger(
-    formData.get("pagesPackQuantity"),
-    0,
-    packsUpper,
-    0,
-  );
-  const packPriceKey =
-    priceKey.endsWith("_yearly") ? "pages_pack_yearly" : "pages_pack_monthly";
-  const packPriceId =
-    packsPerCommunity > 0 ? getStripePriceId(packPriceKey) : null;
-  // If the customer asked for Page Packs but we have no Stripe Price for
-  // the matching cycle, fail loudly instead of silently billing the tier
-  // only. Better the user re-tries than gets a surprise short bill.
-  if (packsPerCommunity > 0 && !packPriceId) {
-    redirect("/settings?billing=missing_price");
-  }
-  const includePackItem = packsPerCommunity > 0 && Boolean(packPriceId);
 
   const supabase = await createClient();
   const {
@@ -140,36 +96,36 @@ export async function startCheckoutSession(formData: FormData) {
   const stripe = getStripe();
   const site = baseSiteUrl();
 
-  // Foot-gun guard: an existing live subscription + a fresh Checkout
-  // session would create a SECOND Stripe subscription (and a duplicate
-  // charge on next renewal). Send the user to the Customer Portal so any
-  // quantity / tier / Page Pack changes apply to the existing sub with
-  // Stripe-managed proration. Run Packs are not sold via Checkout; customers
-  // raise manual audit capacity by upgrading tiers or via the portal if legacy
-  // items exist.
+  const customerId = existing?.stripe_customer_id?.trim();
+
+  // Foot-gun guard: existing live subscription + Checkout creates a duplicate.
   if (
-    existing?.stripe_customer_id &&
+    customerId &&
     existing?.status &&
     PORTAL_GATE_STATUSES.has(existing.status)
   ) {
-    await redirectToCustomerPortal(stripe, existing.stripe_customer_id, site);
+    await redirectToCustomerPortal(stripe, customerId, site);
+  }
+
+  if (customerId && (await customerHasLiveStripeSubscription(stripe, customerId))) {
+    await redirectToCustomerPortal(stripe, customerId, site);
   }
 
   const lineItems: { price: string; quantity: number }[] = [
-    { price: priceId!, quantity },
+    { price: tierStripePriceId, quantity: parsed.quantity },
   ];
-  if (includePackItem) {
+  if (parsed.packPriceId) {
     lineItems.push({
-      price: packPriceId!,
-      quantity: packsPerCommunity * quantity,
+      price: parsed.packPriceId,
+      quantity: parsed.packsPerCommunity * parsed.quantity,
     });
   }
 
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     line_items: lineItems,
-    success_url: `${site}/settings?billing=success`,
-    cancel_url: `${site}/settings?billing=cancel`,
+    success_url: `${site}/settings?tab=billing&billing=success`,
+    cancel_url: `${site}/settings?tab=billing&billing=cancel`,
     client_reference_id: user.id,
     metadata: { supabase_user_id: user.id },
     subscription_data: {
@@ -177,20 +133,76 @@ export async function startCheckoutSession(formData: FormData) {
       metadata: { supabase_user_id: user.id },
     },
     payment_method_collection: "if_required",
-    ...(existing?.stripe_customer_id
-      ? { customer: existing.stripe_customer_id }
+    ...(customerId
+      ? { customer: customerId }
       : { customer_email: user.email ?? undefined }),
   });
 
   if (!session.url) {
-    redirect("/settings?billing=error");
+    redirect("/settings?tab=billing&billing=error");
   }
   redirect(session.url);
 }
 
+export async function updateSubscriptionFromPlanBuilder(formData: FormData) {
+  const parsed = parsePlanBuilderForm(formData);
+  if (!parsed.ok) {
+    redirect(`/settings?tab=billing&billing=${parsed.error}`);
+  }
+
+  if (!isStripeConfigured()) {
+    redirect("/settings?tab=billing&billing=unconfigured");
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: row } = await supabase
+    .from("subscriptions")
+    .select("stripe_customer_id, status, stripe_sub_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const subId = row?.stripe_sub_id?.trim();
+  const customerId = row?.stripe_customer_id?.trim();
+  if (
+    !subId ||
+    !customerId ||
+    !row?.status ||
+    !PORTAL_GATE_STATUSES.has(row.status)
+  ) {
+    redirect("/settings?tab=billing&billing=no_subscription");
+  }
+
+  const stripe = getStripe();
+  const subscription = await stripe.subscriptions.retrieve(subId);
+
+  const built = buildSubscriptionUpdateItems(subscription, {
+    tierPriceKey: parsed.tierPriceKey,
+    quantity: parsed.quantity,
+    packsPerCommunity: parsed.packsPerCommunity,
+  });
+
+  if (!built.ok) {
+    redirect("/settings?tab=billing&billing=missing_price");
+  }
+
+  await stripe.subscriptions.update(subId, {
+    items: toStripeSubscriptionUpdateItems(built.items),
+    proration_behavior: "create_prorations",
+  });
+
+  redirect("/settings?tab=billing&billing=updated");
+}
+
 export async function openBillingPortalSession() {
   if (!isStripeConfigured()) {
-    redirect("/settings?billing=unconfigured");
+    redirect("/settings?tab=billing&billing=unconfigured");
   }
 
   const supabase = await createClient();
@@ -209,7 +221,7 @@ export async function openBillingPortalSession() {
 
   const customerId = row?.stripe_customer_id?.trim();
   if (!customerId) {
-    redirect("/settings?billing=no_customer");
+    redirect("/settings?tab=billing&billing=no_customer");
   }
 
   const stripe = getStripe();

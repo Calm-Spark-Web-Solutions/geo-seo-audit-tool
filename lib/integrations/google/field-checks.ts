@@ -49,7 +49,6 @@ export interface GoogleMetricsSnapshot {
 export async function runGoogleFieldChecks(
   supabase: SupabaseClient,
   communityId: string,
-  _websiteUrl: string,
 ): Promise<GoogleFieldChecksResult> {
   const checks: AuditCheck[] = [];
   let metrics: GoogleMetricsSnapshot | null = null;
@@ -65,7 +64,7 @@ export async function runGoogleFieldChecks(
   if (!connection) {
     return {
       checks: notConnectedChecks(
-        "Connect Google in Settings → Organizations to enable Search Console and GA4 checks.",
+        "Connect Google on the Google setup page to enable Search Console and Analytics checks.",
       ),
       metrics,
     };
@@ -79,7 +78,7 @@ export async function runGoogleFieldChecks(
           "google_oauth_token",
           "Google connection",
           "warn",
-          "Google is connected but the access token could not be refreshed. Reconnect in Settings.",
+          "Google is connected but the access token could not be refreshed. Reconnect on the Google setup page.",
         ),
       ],
       metrics,

@@ -4,6 +4,7 @@ import { SidebarContent } from "@/components/layout/SidebarContent";
 import { useSidebarCollapsed } from "@/components/layout/SidebarCollapseContext";
 import type { AuditQuotaSnapshot } from "@/lib/billing/audit-quota";
 import type { DashboardAccount } from "@/lib/layout/dashboard-account";
+import type { SidebarNavHrefs } from "@/lib/layout/sidebar-nav-hrefs";
 import { cn } from "@/lib/utils";
 import type { Company } from "@/types";
 
@@ -12,11 +13,13 @@ export function Sidebar({
   account,
   quota,
   activeOrganizationIdCookie,
+  navHrefs,
 }: {
   companies: Company[];
   account: DashboardAccount | null;
   quota: AuditQuotaSnapshot;
   activeOrganizationIdCookie: string | null;
+  navHrefs: SidebarNavHrefs;
 }) {
   const { collapsed, hydrated } = useSidebarCollapsed();
 
@@ -24,9 +27,10 @@ export function Sidebar({
     <aside
       className={cn(
         "hidden h-full min-h-0 shrink-0 flex-col border-r border-border bg-muted/40 md:flex",
-        hydrated && collapsed
-          ? "md:w-16 md:min-w-[4rem] md:max-w-[4rem] px-2 py-4 pb-5"
-          : "md:w-[15rem] md:min-w-[15rem] md:max-w-[15rem] p-4 pb-6",
+        "md:w-[15rem] md:min-w-[15rem] md:max-w-[15rem] p-4 pb-6",
+        hydrated &&
+          collapsed &&
+          "md:w-16 md:min-w-[4rem] md:max-w-[4rem] px-2 py-4 pb-5",
         "transition-[padding] duration-200 motion-reduce:transition-none",
       )}
     >
@@ -35,6 +39,7 @@ export function Sidebar({
         account={account}
         quota={quota}
         activeOrganizationIdCookie={activeOrganizationIdCookie}
+        navHrefs={navHrefs}
         variant="desktop"
       />
     </aside>

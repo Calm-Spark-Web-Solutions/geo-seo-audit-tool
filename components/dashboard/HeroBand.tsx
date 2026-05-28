@@ -27,6 +27,15 @@ export interface HeroBandProps {
   communityCount: number;
   totalScans: number;
   scansThisMonth: number;
+  /**
+   * Sessions from AI assistants (ChatGPT, Perplexity, Gemini, …) over the
+   * last 28 days, summed across the latest snapshot of each community in
+   * this org. When > 0, replaces the marketing-copy insight line below the
+   * score ring with a real KPI.
+   */
+  aiSessions28d?: number;
+  /** Number of communities contributing to `aiSessions28d`. */
+  aiCommunityCount?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -250,18 +259,16 @@ function KpiStat({
   label,
   value,
   hint,
-  first,
 }: {
   icon: React.ElementType;
   label: string;
   value: React.ReactNode;
   hint: string;
+  /** @deprecated — borders now come from the wrapping grid's divide-* utilities. */
   first?: boolean;
 }) {
   return (
-    <div
-      className={`flex flex-col gap-1.5 px-6 py-4 ${first ? "" : "border-l border-border"}`}
-    >
+    <div className="flex flex-col gap-1.5 px-4 py-3 sm:px-6 sm:py-4">
       <div className="flex items-center gap-2">
         <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
@@ -288,17 +295,48 @@ export function HeroBand({
   communityCount,
   totalScans,
   scansThisMonth,
+  aiSessions28d = 0,
+  aiCommunityCount = 0,
 }: HeroBandProps) {
-  const { text: insightText } = visibilityInsight(score);
+  const hasAiData = aiSessions28d > 0;
+  const insightNode: React.ReactNode = hasAiData ? (
+    <>
+      <strong className="text-foreground">
+        {aiSessions28d.toLocaleString()}
+      </strong>{" "}
+      session{aiSessions28d === 1 ? "" : "s"} from AI assistants in the last 28
+      days
+      {aiCommunityCount > 0 ? (
+        <>
+          {" "}
+          across{" "}
+          <strong className="text-foreground">
+            {aiCommunityCount.toLocaleString()}
+          </strong>{" "}
+          communit{aiCommunityCount === 1 ? "y" : "ies"}
+        </>
+      ) : null}
+      . ChatGPT, Perplexity, Gemini, and Copilot all show up under each
+      community&apos;s detail page.
+    </>
+  ) : (
+    visibilityInsight(score).text
+  );
   const hasTrend = trendSeo.length >= 2 && trendGeo.length >= 2;
 
   return (
     <Card className="overflow-hidden p-0">
-      {/* Top row: score left / trend right */}
-      <div className={`grid ${hasTrend ? "grid-cols-[minmax(260px,360px)_1fr]" : ""}`}>
+      {/* Top row: stacks on small screens; score left / trend right above md. */}
+      <div
+        className={
+          hasTrend
+            ? "grid grid-cols-1 md:grid-cols-[minmax(260px,360px)_1fr]"
+            : "grid grid-cols-1"
+        }
+      >
         {/* ── Left: score ring + subscores + insight ── */}
         <div
-          className={`flex flex-col gap-5 p-7 ${hasTrend ? "border-r border-border" : ""}`}
+          className={`flex flex-col gap-5 p-5 md:p-7 ${hasTrend ? "border-b border-border md:border-b-0 md:border-r" : ""}`}
         >
           <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
             Portfolio visibility score · 30d rollup
@@ -335,17 +373,17 @@ export function HeroBand({
 
           {/* Insight copy */}
           <p className="text-xs leading-relaxed text-muted-foreground">
-            {insightText}
+            {insightNode}
           </p>
         </div>
 
         {/* ── Right: trend chart ── */}
         {hasTrend && (
-          <div className="flex flex-col gap-4 p-7">
+          <div className="flex flex-col gap-4 p-5 md:p-7">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  8-week trend
+                  Last 8 scans
                 </p>
                 <p className="mt-1 text-sm text-foreground">
                   Average SEO and GEO scores across all communities
@@ -368,13 +406,12 @@ export function HeroBand({
       </div>
 
       {/* ── Bottom KPI strip ── */}
-      <div className="grid grid-cols-3 border-t border-border bg-muted/30">
+      <div className="grid grid-cols-1 divide-y divide-border border-t border-border bg-muted/30 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <KpiStat
           icon={Globe2}
           label="Communities"
           value={communityCount}
           hint="In this organization"
-          first
         />
         <KpiStat
           icon={Activity}

@@ -18,6 +18,7 @@ import { LighthouseSection } from "@/components/audits/LighthouseSection";
 import { PageDetailNav } from "@/components/audits/PageDetailNav";
 import { PageDetailStatBar } from "@/components/audits/PageDetailStatBar";
 import { PageDiff } from "@/components/audits/PageDiff";
+import { SearchQueriesTable } from "@/components/integrations/SearchQueriesTable";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +36,9 @@ import type {
   AuditCheck,
   AuditPage,
   Community,
+  CommunityGoogleMetricsSnapshot,
   FixItem,
+  GscPageRow,
 } from "@/types";
 
 type PriorPageSnapshot = {
@@ -133,14 +136,42 @@ export default async function AuditPageDetailPage({
   const typedAudit = audit as Audit;
   const typedPage = page as AuditPage;
 
-  const { data: community } = await supabase
-    .from("communities")
-    .select("id, name, facility_type")
-    .eq("id", typedAudit.community_id)
-    .maybeSingle();
+  const [{ data: community }, { data: googleSnapshotRow }] = await Promise.all([
+    supabase
+      .from("communities")
+      .select("id, name, facility_type")
+      .eq("id", typedAudit.community_id)
+      .maybeSingle(),
+    supabase
+      .from("community_google_metrics_snapshots")
+      .select(
+        "community_id, snapshot_date, gsc_clicks_28d, gsc_impressions_28d, ga4_sessions_28d, ga4_active_users_28d, gsc_top_queries, gsc_top_pages, ga4_ai_referrals, source, audit_id",
+      )
+      .eq("community_id", typedAudit.community_id)
+      .order("snapshot_date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
   const typedCommunity = community as
     | Pick<Community, "id" | "name" | "facility_type">
     | null;
+  const googleSnapshot =
+    (googleSnapshotRow as CommunityGoogleMetricsSnapshot | null) ?? null;
+
+  // Match the page URL against `gsc_top_pages` rows (exact, then with /
+  // suffix toggled — GSC reports both `https://x.com/foo` and `…/foo/`).
+  function findPageRow(pageUrl: string): GscPageRow | null {
+    const pages = googleSnapshot?.gsc_top_pages ?? null;
+    if (!pages) return null;
+    const normalized = pageUrl.replace(/\/$/, "");
+    return (
+      pages.find((p) => p.page === pageUrl) ??
+      pages.find((p) => p.page.replace(/\/$/, "") === normalized) ??
+      null
+    );
+  }
+  const matchedPageRow = findPageRow(typedPage.url);
+  const topQueries = googleSnapshot?.gsc_top_queries ?? null;
 
   let prior: PriorPageSnapshot | undefined;
   const { data: priorAudit } = await supabase
@@ -335,6 +366,61 @@ export default async function AuditPageDetailPage({
         pageRefresh={{ auditId, pageId }}
       />
 
+      {matchedPageRow || (topQueries && topQueries.length > 0) ? (
+        <div className="flex flex-col gap-3">
+          {matchedPageRow ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  Google search performance for this page
+                </CardTitle>
+                <CardDescription>
+                  Last 28 days — how often this exact URL appeared in Google
+                  results and how many visits it received.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <PageMetric
+                    label="Clicks"
+                    value={matchedPageRow.clicks.toLocaleString()}
+                  />
+                  <PageMetric
+                    label="Impressions"
+                    value={matchedPageRow.impressions.toLocaleString()}
+                  />
+                  <PageMetric
+                    label="CTR"
+                    value={
+                      matchedPageRow.ctr > 0
+                        ? `${(matchedPageRow.ctr * 100).toFixed(1)}%`
+                        : "—"
+                    }
+                  />
+                  <PageMetric
+                    label="Avg position"
+                    value={
+                      matchedPageRow.position > 0
+                        ? matchedPageRow.position.toFixed(1)
+                        : "—"
+                    }
+                  />
+                </dl>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {topQueries && topQueries.length > 0 ? (
+            <SearchQueriesTable
+              rows={topQueries}
+              limit={10}
+              title="Top queries (across this community)"
+              description="The community's most-searched terms in the last 28 days. Google does not currently break down queries per individual page — these are site-wide."
+            />
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Inspector quick-links */}
       {inspectorCards.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -371,5 +457,16 @@ export default async function AuditPageDetailPage({
         excluded={typedPage.exclude_from_audit_score ?? false}
       />
     </>
+  );
+}
+
+function PageMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-1 text-lg font-semibold tabular-nums">{value}</dd>
+    </div>
   );
 }

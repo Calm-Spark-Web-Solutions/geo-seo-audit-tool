@@ -34,7 +34,17 @@ const MESSAGES: Record<
   error: {
     tone: "bad",
     title: "Something went wrong",
-    body: "Stripe returned an error. Try again or check server logs.",
+    body: "We couldn't complete that change. Try again, and contact support if it keeps happening.",
+  },
+  updated: {
+    tone: "ok",
+    title: "Subscription updated",
+    body: "Your plan changes were applied to your existing subscription. Prorated adjustments appear on your next invoice.",
+  },
+  no_subscription: {
+    tone: "warn",
+    title: "No active subscription",
+    body: "Subscribe to a plan first, then you can apply upgrades or downgrades from the cards below.",
   },
 };
 

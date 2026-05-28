@@ -243,20 +243,81 @@ export const TIER_PRICING: Record<
 };
 
 export const COMMUNITY_QUANTITY_HARD_MIN = 1;
-/** Above this, send users to the Partner program for invoiced pricing. */
+/** Self-serve checkout cap for community quantity on the plan builder. */
 export const COMMUNITY_QUANTITY_HARD_MAX = 100;
 
 /**
- * Volume discount on list subtotal at 5 / 10 / 20 / 50+ communities (Stripe
- * tiered prices should match these breakpoints). Returns fraction off (0–0.2).
+ * Volume discount tiers on the **tier line** (Basic/Plus/Pro × communities).
+ * Stripe Prices should use **volume** tiered billing with matching per-unit
+ * amounts — see `stripeVolumeTierRows` and `docs/stripe-dashboard-setup.md`.
  */
-export function volumeDiscountFraction(communityCount: number): number {
+export const VOLUME_DISCOUNT_TIERS = [
+  { minCommunities: 5, percentOff: 5 },
+  { minCommunities: 10, percentOff: 10 },
+  { minCommunities: 20, percentOff: 15 },
+  { minCommunities: 50, percentOff: 20 },
+] as const;
+
+export type VolumeDiscountTier = (typeof VOLUME_DISCOUNT_TIERS)[number];
+
+/** Whole-number percent off list (0, 5, 10, 15, or 20) for a community count. */
+export function volumeDiscountPercent(communityCount: number): number {
   const n = Math.floor(communityCount);
-  if (n >= 50) return 0.2;
-  if (n >= 20) return 0.15;
-  if (n >= 10) return 0.1;
-  if (n >= 5) return 0.05;
-  return 0;
+  let percent = 0;
+  for (const tier of VOLUME_DISCOUNT_TIERS) {
+    if (n >= tier.minCommunities) percent = tier.percentOff;
+  }
+  return percent;
+}
+
+/** Fraction off list subtotal (0–0.2). */
+export function volumeDiscountFraction(communityCount: number): number {
+  return volumeDiscountPercent(communityCount) / 100;
+}
+
+/** Index of the active tier in `VOLUME_DISCOUNT_TIERS`, or -1 when below 5 communities. */
+export function activeVolumeDiscountTierIndex(communityCount: number): number {
+  const n = Math.floor(communityCount);
+  let idx = -1;
+  for (let i = 0; i < VOLUME_DISCOUNT_TIERS.length; i++) {
+    if (n >= VOLUME_DISCOUNT_TIERS[i].minCommunities) idx = i;
+  }
+  return idx;
+}
+
+/** Per-community unit price after volume discount (2 decimal USD). */
+export function volumeDiscountedUnitUsd(
+  listUnitUsd: number,
+  communityCount: number,
+): number {
+  const frac = volumeDiscountFraction(communityCount);
+  return Math.round(listUnitUsd * (1 - frac) * 100) / 100;
+}
+
+/**
+ * Stripe **volume** tier rows (`up_to` + unit amount) for a list per-community price.
+ * Use when configuring tier Prices in the Dashboard.
+ */
+export function stripeVolumeTierRows(listUnitUsd: number): Array<{
+  upTo: number | null;
+  unitUsd: number;
+  percentOff: number;
+}> {
+  const rows: Array<{ upTo: number | null; unitUsd: number; percentOff: number }> =
+    [{ upTo: 4, unitUsd: listUnitUsd, percentOff: 0 }];
+
+  const upToStops = [9, 19, 49, null] as const;
+  for (let i = 0; i < VOLUME_DISCOUNT_TIERS.length; i++) {
+    const tier = VOLUME_DISCOUNT_TIERS[i];
+    const unitUsd =
+      Math.round(listUnitUsd * (1 - tier.percentOff / 100) * 100) / 100;
+    rows.push({
+      upTo: upToStops[i],
+      unitUsd,
+      percentOff: tier.percentOff,
+    });
+  }
+  return rows;
 }
 
 /** Whole-dollar list subtotal before volume discount (tier unit × communities). */
@@ -267,14 +328,22 @@ export function monthlyListSubtotal(
   return unitMonthlyUsd * Math.max(COMMUNITY_QUANTITY_HARD_MIN, communityCount);
 }
 
-/** Estimated post-volume-discount monthly tier subtotal (integer USD). */
+/** Estimated post-volume-discount tier subtotal (integer USD; monthly or yearly unit). */
+export function volumeDiscountedSubtotal(
+  unitUsd: number,
+  communityCount: number,
+): number {
+  const list = monthlyListSubtotal(unitUsd, communityCount);
+  const frac = volumeDiscountFraction(communityCount);
+  return Math.round(list * (1 - frac));
+}
+
+/** @deprecated Prefer `volumeDiscountedSubtotal` — same behavior. */
 export function monthlyVolumeDiscountedSubtotal(
   unitMonthlyUsd: number,
   communityCount: number,
 ): number {
-  const list = monthlyListSubtotal(unitMonthlyUsd, communityCount);
-  const frac = volumeDiscountFraction(communityCount);
-  return Math.round(list * (1 - frac));
+  return volumeDiscountedSubtotal(unitMonthlyUsd, communityCount);
 }
 
 /**

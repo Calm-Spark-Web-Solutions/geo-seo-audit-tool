@@ -17,9 +17,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RankLume",
+  title: {
+    default: "RankLume",
+    template: "%s · RankLume",
+  },
   description:
-    "AI-powered SEO and GEO audits for senior living community websites.",
+    "AI-powered SEO and GEO visibility scans for senior living community websites.",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://app.ranklume.io",
+  ),
 };
 
 export default function RootLayout({

@@ -103,3 +103,26 @@ export async function loadCommunityIdsForUser(
     .in("company_id", companyIds);
   return (data ?? []).map((c) => c.id as string);
 }
+
+/** Community ids for a single organization. */
+export async function loadCommunityIdsForCompany(
+  supabase: SupabaseClient,
+  companyId: string,
+): Promise<string[]> {
+  return loadCommunityIdsForUser(supabase, [companyId]);
+}
+
+/** Returns true when the user belongs to the company. */
+export async function userIsMemberOfCompany(
+  supabase: SupabaseClient,
+  userId: string,
+  companyId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("company_members")
+    .select("company_id")
+    .eq("user_id", userId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  return Boolean(data);
+}

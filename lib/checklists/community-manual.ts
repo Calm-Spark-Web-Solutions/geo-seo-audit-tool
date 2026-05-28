@@ -45,6 +45,13 @@ export const COMMUNITY_MANUAL_ITEMS: ManualTemplateItem[] = [
     label: "Google Search Console property verified and monitored",
   },
   {
+    key: "ga4_traffic_received",
+    category: "Crawlability",
+    label: "GA4 property receiving traffic (28-day check)",
+    helper:
+      "Sign off when Analytics shows real sessions. After you connect Google, map GA4 for this community, and a visibility scan reports sessions in the last 28 days, this row is covered automatically.",
+  },
+  {
     key: "crawl_budget_reviewed",
     category: "Crawlability",
     label: "Crawl budget not wasted on low-value paths (manual review)",

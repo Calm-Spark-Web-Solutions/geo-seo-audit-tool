@@ -22,6 +22,7 @@ import {
   googleMappingStatus,
   type GooglePropertiesCatalog,
 } from "@/lib/integrations/google/google-properties-ui";
+import { friendlyTokenRefreshError } from "@/lib/integrations/google/oauth-error-copy";
 
 export interface CompanyCommunityGoogleRow {
   id: string;
@@ -36,6 +37,7 @@ interface Props {
   companyName: string;
   googleConnected: boolean;
   googleAccountEmail: string | null;
+  googleLastError?: string | null;
   communities: CompanyCommunityGoogleRow[];
   oauthConfigured: boolean;
   showConnectedFlash?: boolean;
@@ -87,6 +89,7 @@ export function CompanyGoogleIntegrationsPanel({
   companyName,
   googleConnected,
   googleAccountEmail,
+  googleLastError = null,
   communities,
   oauthConfigured,
   showConnectedFlash = false,
@@ -112,12 +115,19 @@ export function CompanyGoogleIntegrationsPanel({
     [communities],
   );
 
-  useEffect(() => {
-    if (!googleConnected || !oauthConfigured) {
+  const canLoadCatalog = googleConnected && oauthConfigured;
+  const [prevCanLoadCatalog, setPrevCanLoadCatalog] = useState(canLoadCatalog);
+  if (canLoadCatalog !== prevCanLoadCatalog) {
+    setPrevCanLoadCatalog(canLoadCatalog);
+    if (!canLoadCatalog) {
       setCatalog(null);
+      setLoadError(null);
       initRows(null);
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!canLoadCatalog) return;
     let cancelled = false;
     void (async () => {
       const result = await fetchGooglePropertiesCatalog(companyId);
@@ -135,7 +145,7 @@ export function CompanyGoogleIntegrationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [companyId, googleConnected, oauthConfigured, initRows]);
+  }, [companyId, canLoadCatalog, initRows]);
 
   async function disconnect() {
     setDisconnecting(true);
@@ -174,7 +184,7 @@ export function CompanyGoogleIntegrationsPanel({
     }
   }
 
-  const connectHref = `/api/integrations/google/connect?company_id=${encodeURIComponent(companyId)}&return_to=${encodeURIComponent(`/companies/${companyId}`)}`;
+  const connectHref = `/api/integrations/google/connect?company_id=${encodeURIComponent(companyId)}&return_to=${encodeURIComponent(`/integrations/google?org=${companyId}`)}`;
 
   if (!oauthConfigured) {
     return (
@@ -207,6 +217,13 @@ export function CompanyGoogleIntegrationsPanel({
             Google connected — choose properties for each community below, then
             save.
           </p>
+        ) : null}
+
+        {googleConnected && googleLastError ? (
+          <ReconnectGoogleNotice
+            connectHref={connectHref}
+            lastError={googleLastError}
+          />
         ) : null}
 
         <section className="flex flex-col gap-3 rounded-md border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -370,5 +387,32 @@ export function CompanyGoogleIntegrationsPanel({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ReconnectGoogleNotice({
+  connectHref,
+  lastError,
+}: {
+  connectHref: string;
+  lastError: string;
+}) {
+  const friendly = friendlyTokenRefreshError(lastError);
+  if (!friendly) return null;
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between"
+      role="alert"
+    >
+      <div>
+        <p className="font-medium">{friendly.title}</p>
+        <p className="mt-0.5 text-amber-800/90 dark:text-amber-200/80">
+          {friendly.description}
+        </p>
+      </div>
+      <Button asChild size="sm" variant="outline" className="shrink-0">
+        <a href={connectHref}>Reconnect Google</a>
+      </Button>
+    </div>
   );
 }

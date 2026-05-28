@@ -1,6 +1,24 @@
 import type { Ga4AccountOption, Ga4PropertyOption } from "./match-property";
 
+import {
+  AI_ASSISTANT_HOSTS,
+  aiAssistantFromHost,
+  aiAssistantHostList,
+} from "./ai-assistant-hosts";
+
 export interface Ga428DayTotals {
+  sessions: number;
+  activeUsers: number;
+}
+
+/** One AI-assistant referrer row aggregated over the last 28 days. */
+export interface GaAiReferral {
+  /** Raw GA4 `sessionSource` value, e.g. "chat.openai.com". */
+  source: string;
+  /** Friendly display label (e.g. "ChatGPT"). */
+  label: string;
+  /** Optional grouping (e.g. "OpenAI") for collapsing multi-host vendors. */
+  group?: string;
   sessions: number;
   activeUsers: number;
 }
@@ -112,11 +130,88 @@ export async function listGa4AccountsWithProperties(
   return accounts;
 }
 
-export async function listGa4Properties(
+/**
+ * Build the GA4 `dimensionFilter` payload that limits a `runReport` to AI
+ * assistant hostnames. Exported for tests so we can assert exactly which hosts
+ * we ask GA4 about.
+ */
+export function buildAiAssistantSessionSourceFilter(): {
+  filter: {
+    fieldName: "sessionSource";
+    inListFilter: { values: string[]; caseSensitive: false };
+  };
+} {
+  return {
+    filter: {
+      fieldName: "sessionSource",
+      inListFilter: {
+        values: aiAssistantHostList(),
+        caseSensitive: false,
+      },
+    },
+  };
+}
+
+/**
+ * Fetch 28-day session + active user counts grouped by `sessionSource`,
+ * filtered to known AI assistant hostnames.
+ *
+ * Returns an empty array when GA4 has no matching rows. Unknown hosts that
+ * sneak through the filter (e.g. case variants) are mapped back via the
+ * curated lookup and dropped if still unknown.
+ */
+export async function fetchGa4AiReferrals(
   accessToken: string,
-): Promise<Ga4PropertyOption[]> {
-  const accounts = await listGa4AccountsWithProperties(accessToken);
-  return accounts.flatMap((a) => a.properties);
+  propertyId: string,
+): Promise<GaAiReferral[]> {
+  const resource = propertyResourceName(propertyId);
+  const res = await fetch(
+    `https://analyticsdata.googleapis.com/v1beta/${resource}:runReport`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: "28daysAgo", endDate: "yesterday" }],
+        dimensions: [{ name: "sessionSource" }],
+        metrics: [{ name: "sessions" }, { name: "activeUsers" }],
+        dimensionFilter: buildAiAssistantSessionSourceFilter(),
+        limit: String(AI_ASSISTANT_HOSTS.length * 2),
+      }),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`GA4 AI referrals runReport failed: ${res.status} ${text}`);
+  }
+  const data = (await res.json()) as {
+    rows?: Array<{
+      dimensionValues?: Array<{ value?: string }>;
+      metricValues?: Array<{ value?: string }>;
+    }>;
+  };
+
+  const referrals: GaAiReferral[] = [];
+  for (const row of data.rows ?? []) {
+    const source = (row.dimensionValues?.[0]?.value ?? "").trim();
+    if (!source) continue;
+    const match = aiAssistantFromHost(source);
+    if (!match) continue;
+    const sessions = Number(row.metricValues?.[0]?.value ?? 0);
+    const activeUsers = Number(row.metricValues?.[1]?.value ?? 0);
+    referrals.push({
+      source,
+      label: match.label,
+      group: match.group,
+      sessions,
+      activeUsers,
+    });
+  }
+
+  referrals.sort((a, b) => b.sessions - a.sessions);
+  return referrals;
 }
 
 export async function fetchGa4_28DayTotals(

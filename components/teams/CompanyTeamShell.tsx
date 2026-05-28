@@ -176,12 +176,8 @@ export function CompanyTeamShell({
 
       {membersError ? (
         <p className="text-sm text-destructive" role="alert">
-          Could not load member list: {membersError}. If you just deployed,
-          apply migration{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">
-            020_list_company_members_with_email
-          </code>{" "}
-          to your database.
+          We couldn&rsquo;t load this team right now. Refresh the page, and
+          contact support if it keeps happening.
         </p>
       ) : null}
 

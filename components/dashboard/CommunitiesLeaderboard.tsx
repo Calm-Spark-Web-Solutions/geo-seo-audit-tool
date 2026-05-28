@@ -125,9 +125,9 @@ export function CommunitiesLeaderboard({
         </CardDescription>
       </CardHeader>
 
-      {/* Header row */}
+      {/* Header row — desktop only. Mobile gets stacked cards below. */}
       <div
-        className="grid items-center gap-4 border-t border-border bg-muted/40 px-6 py-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"
+        className="hidden items-center gap-4 border-t border-border bg-muted/40 px-6 py-2.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid"
         style={{ gridTemplateColumns: gridCols }}
       >
         <span>#</span>
@@ -148,12 +148,53 @@ export function CommunitiesLeaderboard({
           <Link
             key={row.communityId}
             href={href}
-            className="group grid items-center gap-4 border-t border-border px-6 py-3 transition-colors hover:bg-accent"
-            style={{ gridTemplateColumns: gridCols }}
+            className="group block border-t border-border transition-colors hover:bg-accent md:grid md:items-center md:gap-4 md:px-6 md:py-3"
+            style={
+              {
+                ["--leaderboard-grid"]: gridCols,
+                gridTemplateColumns: "var(--leaderboard-grid)",
+              } as React.CSSProperties
+            }
           >
-            {/* Rank */}
+            {/* Mobile card layout */}
+            <div className="flex items-start gap-3 px-4 py-3 md:hidden">
+              <span
+                className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold tabular-nums ${
+                  i === 0
+                    ? "bg-primary/10 text-primary"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {i + 1}
+              </span>
+              <CommunityAvatar name={row.name} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="truncate text-sm font-semibold">{row.name}</p>
+                  <span
+                    className={`text-base font-bold tabular-nums ${scoreFgClass(row.latestScore)}`}
+                  >
+                    {row.latestScore ?? "—"}
+                  </span>
+                </div>
+                {showCompany && row.companyName ? (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {row.companyName}
+                  </p>
+                ) : null}
+                <p className="text-xs text-muted-foreground">
+                  Last scan {formatLastScan(row.lastScanAt)}
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <ScoreBar score={row.latestSeo} label="SEO" />
+                  <ScoreBar score={row.latestGeo} label="GEO" />
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop row contents */}
             <span
-              className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold tabular-nums ${
+              className={`hidden h-6 w-6 items-center justify-center rounded-full text-xs font-semibold tabular-nums md:inline-flex ${
                 i === 0
                   ? "bg-primary/10 text-primary"
                   : "bg-muted text-muted-foreground"
@@ -161,33 +202,23 @@ export function CommunitiesLeaderboard({
             >
               {i + 1}
             </span>
-
-            {/* Community name */}
-            <div className="flex min-w-0 items-center gap-3">
+            <div className="hidden min-w-0 items-center gap-3 md:flex">
               <CommunityAvatar name={row.name} />
               <span className="truncate text-sm font-semibold">{row.name}</span>
             </div>
-
-            {/* Company (multi-org only) */}
             {showCompany && (
-              <span className="truncate text-xs text-muted-foreground">
+              <span className="hidden truncate text-xs text-muted-foreground md:inline">
                 {row.companyName ?? "—"}
               </span>
             )}
-
-            {/* Last scan */}
-            <span className="text-xs text-muted-foreground">
+            <span className="hidden text-xs text-muted-foreground md:inline">
               {formatLastScan(row.lastScanAt)}
             </span>
-
-            {/* Score bars */}
-            <div className="flex flex-col gap-1.5">
+            <div className="hidden flex-col gap-1.5 md:flex">
               <ScoreBar score={row.latestSeo} label="SEO" />
               <ScoreBar score={row.latestGeo} label="GEO" />
             </div>
-
-            {/* Sparkline */}
-            <div className="flex items-center justify-end">
+            <div className="hidden items-center justify-end md:flex">
               {row.spark.length >= 2 && (
                 <Sparkline
                   data={row.spark}
@@ -198,9 +229,7 @@ export function CommunitiesLeaderboard({
                 />
               )}
             </div>
-
-            {/* Score ring */}
-            <div className="flex justify-end">
+            <div className="hidden justify-end md:flex">
               <ScoreRing score={row.latestScore} size={40} strokeWidth={6} />
             </div>
           </Link>

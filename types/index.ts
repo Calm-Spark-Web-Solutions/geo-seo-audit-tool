@@ -138,6 +138,42 @@ export interface GoogleMetricsJson {
   ga4_active_users_28d: number;
 }
 
+/**
+ * One row from a GSC `searchAnalytics.query` response with the `query`
+ * dimension. Persisted as JSON inside
+ * `community_google_metrics_snapshots.gsc_top_queries`.
+ */
+export interface GscQueryRow {
+  query: string;
+  clicks: number;
+  impressions: number;
+  /** Avg result position; lower is better. */
+  position: number;
+  /** Click-through rate as a fraction (0..1). */
+  ctr: number;
+}
+
+/** Same shape as `GscQueryRow` but keyed by landing page URL. */
+export interface GscPageRow {
+  page: string;
+  clicks: number;
+  impressions: number;
+  position: number;
+  ctr: number;
+}
+
+/** GA4 sessions originating from a known AI-assistant hostname. */
+export interface GaAiReferral {
+  /** Raw `sessionSource` value reported by GA4. */
+  source: string;
+  /** Friendly display label (e.g. "ChatGPT"). */
+  label: string;
+  /** Optional vendor grouping (e.g. "OpenAI"). */
+  group?: string;
+  sessions: number;
+  activeUsers: number;
+}
+
 export interface CommunityGoogleMetricsSnapshot {
   community_id: string;
   snapshot_date: string;
@@ -147,6 +183,12 @@ export interface CommunityGoogleMetricsSnapshot {
   ga4_active_users_28d: number | null;
   source: "audit" | "daily_sync";
   audit_id: string | null;
+  /** Top GSC queries (28d); null on legacy rows pre-migration 029. */
+  gsc_top_queries?: GscQueryRow[] | null;
+  /** Top GSC landing pages (28d); null on legacy rows pre-migration 029. */
+  gsc_top_pages?: GscPageRow[] | null;
+  /** GA4 sessions per AI assistant hostname (28d); null on legacy rows. */
+  ga4_ai_referrals?: GaAiReferral[] | null;
 }
 
 /** Optional structured p75 sample for Chrome UX Report metric rows (new audits). */

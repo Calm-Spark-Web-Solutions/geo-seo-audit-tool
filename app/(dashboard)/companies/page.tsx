@@ -36,7 +36,7 @@ export default async function CompaniesPage() {
     <>
       <PageHeader
         title="Organizations"
-        description="Companies you run and companies you audit. Use this area when someone needs cross-company access (for example a GEO or SEO auditor with several clients)."
+        description="Every organization is a group of communities you manage. Add an organization for each company you work with — handy if you run more than one brand or audit clients."
         actions={
           <Button asChild>
             <Link href="/companies/new">
@@ -51,7 +51,7 @@ export default async function CompaniesPage() {
         <EmptyState
           icon={Building2}
           title="No organizations yet"
-          description="Create your first organization to start visibility scans on communities."
+          description="Create your first organization, then add the community websites you want to track."
           actions={
             <Button asChild>
               <Link href="/companies/new">Create organization</Link>

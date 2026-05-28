@@ -106,7 +106,7 @@ export function PageDetailNav({ auditId, pageId }: PageDetailNavProps) {
   return (
     <nav
       aria-label="Audit page sections"
-      className="sticky top-0 z-20 -mx-3 mb-1 border-b border-border bg-background/95 px-3 backdrop-blur sm:-mx-4 sm:px-4 md:-mx-6 md:px-6"
+      className="sticky top-14 z-10 -mx-3 mb-1 border-b border-border bg-background/95 px-3 backdrop-blur sm:-mx-4 sm:px-4 md:-mx-6 md:px-6 md:top-0 md:z-20"
     >
       <ul className="-mx-1 flex items-center gap-0.5 overflow-x-auto py-2 text-sm">
         {items.map((item) => {

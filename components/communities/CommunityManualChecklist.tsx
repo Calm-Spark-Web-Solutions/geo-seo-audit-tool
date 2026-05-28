@@ -6,9 +6,13 @@ import { toast } from "sonner";
 
 import { saveCommunityManualChecklist } from "@/app/(dashboard)/communities/actions";
 import {
-  COMMUNITY_MANUAL_ITEMS,
   geoManualChecklistProgress,
+  type ManualTemplateItem,
 } from "@/lib/checklists/community-manual";
+import {
+  getVisibleCommunityManualItems,
+  type ManualGoogleCoverageInput,
+} from "@/lib/checklists/manual-google-coverage";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -28,10 +32,11 @@ const STATUS_OPTIONS: ManualVerificationStatus[] = [
 
 function buildInitialState(
   saved: CommunityManualResults | null,
+  visibleItems: ManualTemplateItem[],
 ): Record<string, { status: ManualVerificationStatus; notes: string }> {
   const out: Record<string, { status: ManualVerificationStatus; notes: string }> =
     {};
-  for (const item of COMMUNITY_MANUAL_ITEMS) {
+  for (const item of visibleItems) {
     const row = saved?.[item.key];
     out[item.key] = {
       status: row?.status ?? "unreviewed",
@@ -44,17 +49,26 @@ function buildInitialState(
 export function CommunityManualChecklist({
   communityId,
   initialResults,
+  manualGoogleCoverage,
   cardDescription,
   variant = "default",
 }: {
   communityId: string;
   initialResults: CommunityManualResults | null;
+  manualGoogleCoverage: ManualGoogleCoverageInput;
   /** Passed from a Server Component so SSR and hydration share the same string. */
   cardDescription: string;
   /** Collapsed `<details>` by default — use on audit report pages only. */
   variant?: "default" | "collapsible";
 }) {
-  const [state, setState] = useState(() => buildInitialState(initialResults));
+  const visibleItems = useMemo(
+    () => getVisibleCommunityManualItems(manualGoogleCoverage),
+    [manualGoogleCoverage],
+  );
+
+  const [state, setState] = useState(() =>
+    buildInitialState(initialResults, visibleItems),
+  );
   const [pending, startTransition] = useTransition();
 
   const geoProgress = useMemo(
@@ -63,14 +77,14 @@ export function CommunityManualChecklist({
   );
 
   const grouped = useMemo(() => {
-    const map = new Map<string, typeof COMMUNITY_MANUAL_ITEMS>();
-    for (const item of COMMUNITY_MANUAL_ITEMS) {
+    const map = new Map<string, ManualTemplateItem[]>();
+    for (const item of visibleItems) {
       const list = map.get(item.category) ?? [];
       list.push(item);
       map.set(item.category, list);
     }
     return Array.from(map.entries());
-  }, []);
+  }, [visibleItems]);
 
   const setRow = (
     key: string,
@@ -84,7 +98,7 @@ export function CommunityManualChecklist({
 
   const onSave = () => {
     const payload: CommunityManualResults = {};
-    for (const item of COMMUNITY_MANUAL_ITEMS) {
+    for (const item of visibleItems) {
       const row = state[item.key];
       payload[item.key] = {
         status: row.status,

@@ -38,12 +38,13 @@ export default async function OnboardingPage() {
   return (
     <>
       <Brand size="lg" />
-      <Card className="w-full max-w-lg">
+      <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle>Create your first organization</CardTitle>
+          <CardTitle>Welcome — let&apos;s set up your first organization</CardTitle>
           <CardDescription>
-            This is the company or agency that owns the websites you&apos;ll
-            audit. You can add more later.
+            An organization is the company or brand that owns the community
+            websites you&apos;ll track. We&apos;ll add your first community
+            right after this, then run a visibility scan.
           </CardDescription>
         </CardHeader>
         <CardContent>

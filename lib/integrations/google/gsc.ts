@@ -18,6 +18,30 @@ export interface Gsc28DayTotals {
   impressions: number;
 }
 
+/** One row from a GSC searchAnalytics.query dimensional response. */
+export interface GscQueryRow {
+  query: string;
+  clicks: number;
+  impressions: number;
+  /** Avg result position over the window (lower is better). */
+  position: number;
+  /** Click-through rate as a fraction (0..1). */
+  ctr: number;
+}
+
+export interface GscPageRow {
+  page: string;
+  clicks: number;
+  impressions: number;
+  position: number;
+  ctr: number;
+}
+
+export interface Gsc28DayBreakdowns {
+  topQueries: GscQueryRow[];
+  topPages: GscPageRow[];
+}
+
 function encodeSiteUrl(siteUrl: string): string {
   return encodeURIComponent(siteUrl);
 }
@@ -123,4 +147,96 @@ export async function fetchGsc28DayTotals(
     clicks: row?.clicks ?? 0,
     impressions: row?.impressions ?? 0,
   };
+}
+
+interface GscDimensionalRow {
+  keys?: string[];
+  clicks?: number;
+  impressions?: number;
+  ctr?: number;
+  position?: number;
+}
+
+async function fetchGscDimensionalRows(
+  accessToken: string,
+  siteUrl: string,
+  dimension: "query" | "page",
+  rowLimit: number,
+): Promise<GscDimensionalRow[]> {
+  const end = new Date();
+  end.setUTCDate(end.getUTCDate() - 1);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 27);
+
+  const res = await fetch(
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeSiteUrl(siteUrl)}/searchAnalytics/query`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        startDate: formatIsoDate(start),
+        endDate: formatIsoDate(end),
+        dimensions: [dimension],
+        rowLimit,
+      }),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(
+      `GSC searchAnalytics.query (${dimension}) failed: ${res.status} ${text}`,
+    );
+  }
+  const data = (await res.json()) as { rows?: GscDimensionalRow[] };
+  return data.rows ?? [];
+}
+
+/**
+ * Fetch top queries + top pages over the last 28 days for a GSC site.
+ *
+ * Both dimensions are fetched in parallel. Failure of one does not abort the
+ * other — empty arrays are returned for the failed dimension so the caller can
+ * still persist whatever succeeded.
+ */
+export async function fetchGsc28DayBreakdowns(
+  accessToken: string,
+  siteUrl: string,
+  opts: { rowLimit?: number } = {},
+): Promise<Gsc28DayBreakdowns> {
+  const rowLimit = Math.max(1, Math.min(opts.rowLimit ?? 25, 100));
+
+  const [queryRowsResult, pageRowsResult] = await Promise.allSettled([
+    fetchGscDimensionalRows(accessToken, siteUrl, "query", rowLimit),
+    fetchGscDimensionalRows(accessToken, siteUrl, "page", rowLimit),
+  ]);
+
+  const queryRows =
+    queryRowsResult.status === "fulfilled" ? queryRowsResult.value : [];
+  const pageRows =
+    pageRowsResult.status === "fulfilled" ? pageRowsResult.value : [];
+
+  const topQueries: GscQueryRow[] = queryRows
+    .map((r) => ({
+      query: (r.keys?.[0] ?? "").trim(),
+      clicks: r.clicks ?? 0,
+      impressions: r.impressions ?? 0,
+      position: r.position ?? 0,
+      ctr: r.ctr ?? 0,
+    }))
+    .filter((r) => r.query.length > 0);
+
+  const topPages: GscPageRow[] = pageRows
+    .map((r) => ({
+      page: (r.keys?.[0] ?? "").trim(),
+      clicks: r.clicks ?? 0,
+      impressions: r.impressions ?? 0,
+      position: r.position ?? 0,
+      ctr: r.ctr ?? 0,
+    }))
+    .filter((r) => r.page.length > 0);
+
+  return { topQueries, topPages };
 }

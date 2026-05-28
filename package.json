@@ -13,7 +13,9 @@
     "test:coverage": "vitest run --coverage",
     "analyze": "ANALYZE=1 next build",
     "deadcode": "knip",
-    "deadcode:fix": "knip --fix"
+    "deadcode:fix": "knip --fix",
+    "stripe:setup-volume-prices": "tsx --env-file=.env scripts/stripe-setup-volume-prices.ts",
+    "stripe:setup-volume-prices:apply": "tsx --env-file=.env scripts/stripe-setup-volume-prices.ts --apply"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -25,10 +27,7 @@
     "@sentry/profiling-node": "^10.53.1",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.105.3",
-<<<<<<< improvements
     "@teispace/next-themes": "^0.4.2",
-=======
->>>>>>> main
     "axios": "^1.16.1",
     "cheerio": "^1.0.0",
     "class-variance-authority": "^0.7.1",
@@ -37,10 +36,6 @@
     "fast-xml-parser": "^5.2.0",
     "lucide-react": "^0.507.0",
     "next": "^16.2.6",
-<<<<<<< improvements
-=======
-    "next-themes": "^0.4.6",
->>>>>>> main
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "recharts": "^3.8.1",
@@ -64,6 +59,7 @@
     "knip": "^5.64.0",
     "supabase": "^2.98.2",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.6"
   }

@@ -1,4 +1,4 @@
-import type { Audit, AuditFetchFailure } from "@/types";
+import type { AuditFetchFailure } from "@/types";
 
 /** Planned URL count for a completed or in-progress scan. */
 export function auditPlannedPageCount(audit: {

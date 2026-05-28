@@ -6,7 +6,9 @@ import { useId, useMemo, useState } from "react";
 import {
   openBillingPortalSession,
   startCheckoutSession,
+  updateSubscriptionFromPlanBuilder,
 } from "@/lib/billing/actions";
+import { planBuilderMatchesSubscription } from "@/lib/billing/stripe-subscription-update";
 import {
   COMMUNITY_QUANTITY_HARD_MAX,
   COMMUNITY_QUANTITY_HARD_MIN,
@@ -21,12 +23,12 @@ import {
 } from "@/lib/billing/plan-limits";
 import type { CheckoutTierPriceKey } from "@/lib/billing/price-map";
 import {
-  PARTNER_PROGRAM,
   PUBLIC_TIERS,
   formatUsd,
   type PublicTierCard,
   type PublicTierId,
 } from "@/lib/billing/plans";
+import { VolumeDiscountsPanel } from "@/components/billing/VolumeDiscountsPanel";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -163,7 +165,6 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
   const quantityInputId = useId();
   const packsInputId = useId();
   const billingBlocked = !stripeConfigured;
-  const overMax = quantity >= COMMUNITY_QUANTITY_HARD_MAX;
 
   return (
     <div className="flex flex-col gap-6">
@@ -174,6 +175,8 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
         setCycle={setCycle}
         quantityInputId={quantityInputId}
       />
+
+      <VolumeDiscountsPanel communityCount={quantity} />
 
       <PagePackControls
         packs={packs}
@@ -196,11 +199,10 @@ export function PricingCards({ subscription, stripeConfigured }: Props) {
             onSelect={() => setSelectedTier(tier.id)}
             billingBlocked={billingBlocked}
             hasLiveSubscription={hasLiveSubscription}
+            subscription={subscription}
           />
         ))}
       </div>
-
-      <PartnerCard atOrAboveMax={overMax} billingBlocked={billingBlocked} />
 
       {hasCustomer && stripeConfigured ? (
         <form action={openBillingPortalSession}>
@@ -434,6 +436,7 @@ function TierCard({
   onSelect,
   billingBlocked,
   hasLiveSubscription,
+  subscription,
 }: {
   tier: PublicTierCard;
   quantity: number;
@@ -443,6 +446,7 @@ function TierCard({
   onSelect: () => void;
   billingBlocked: boolean;
   hasLiveSubscription: boolean;
+  subscription: Subscription | null;
 }) {
   const limits = PLAN_LIMITS_BY_SLUG[tier.monthlyKey];
   const priceKey = cycle === "monthly" ? tier.monthlyKey : tier.yearlyKey;
@@ -485,6 +489,14 @@ function TierCard({
 
   const effectiveNewPages = effectiveMonthlyNewPagesCap(limitsWithAddons);
 
+  const matchesCurrentPlan = planBuilderMatchesSubscription(subscription, {
+    tierPriceKey: priceKey,
+    quantity,
+    packsPerCommunity: pagePacksForTier,
+  });
+  const applyDisabled =
+    billingBlocked || (hasLiveSubscription && matchesCurrentPlan);
+
   return (
     <Card
       role="radio"
@@ -521,9 +533,9 @@ function TierCard({
               {formatUsd(unitPrice)}
               {unitSuffix} / community
               {discountFrac > 0 ? (
-                <span className="mt-0.5 block text-[10px] text-emerald-600">
+                <span className="mt-0.5 block text-[10px] text-emerald-600 dark:text-emerald-500">
                   Includes {Math.round(discountFrac * 100)}% volume discount at{" "}
-                  {quantity} communities (Stripe tier prices should match).
+                  {quantity} communities
                 </span>
               ) : null}
             </span>
@@ -564,87 +576,61 @@ function TierCard({
             ) : null}
           </div>
 
-          {hasLiveSubscription ? (
-            <form action={openBillingPortalSession}>
-              <Button
-                type="submit"
-                size="sm"
-                variant="outline"
-                className="w-full"
-                disabled={billingBlocked}
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                Manage in Stripe
-              </Button>
-            </form>
-          ) : (
-            <form action={startCheckoutSession}>
-              <input type="hidden" name="priceKey" value={priceKey} />
-              <input type="hidden" name="quantity" value={String(quantity)} />
-              <input
-                type="hidden"
-                name="pagesPackQuantity"
-                value={String(pagePacksForTier)}
-              />
-              <Button
-                type="submit"
-                size="sm"
-                className="w-full"
-                disabled={billingBlocked}
-                onClick={(e) => {
-                  e.stopPropagation();
-                }}
-              >
-                Subscribe {cycle === "monthly" ? "monthly" : "yearly"}
-              </Button>
-            </form>
-          )}
+          {isSelected ? (
+            hasLiveSubscription ? (
+              <form action={updateSubscriptionFromPlanBuilder}>
+                <input type="hidden" name="priceKey" value={priceKey} />
+                <input type="hidden" name="quantity" value={String(quantity)} />
+                <input
+                  type="hidden"
+                  name="pagesPackQuantity"
+                  value={String(pagePacksForTier)}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="w-full"
+                  disabled={applyDisabled}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  {matchesCurrentPlan ? "Current plan" : "Apply changes"}
+                </Button>
+              </form>
+            ) : (
+              <form action={startCheckoutSession}>
+                <input type="hidden" name="priceKey" value={priceKey} />
+                <input type="hidden" name="quantity" value={String(quantity)} />
+                <input
+                  type="hidden"
+                  name="pagesPackQuantity"
+                  value={String(pagePacksForTier)}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="w-full"
+                  disabled={billingBlocked}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                  }}
+                >
+                  Start 14-day free trial
+                </Button>
+              </form>
+            )
+          ) : null}
         </div>
       </CardContent>
       <CardFooter className="text-xs text-muted-foreground">
         {billingBlocked
           ? "Checkout is temporarily unavailable. Please contact support."
           : hasLiveSubscription
-            ? "Change quantity, tier, or add-ons on your existing subscription \u2014 no duplicate charges."
-            : null}
+            ? "Update communities, tier, or add-ons anytime \u2014 no duplicate charges."
+            : "14 days free, then " +
+              `${formatUsd(unitPrice)}${unitSuffix} per community. Cancel anytime.`}
       </CardFooter>
-    </Card>
-  );
-}
-
-function PartnerCard({
-  atOrAboveMax,
-  billingBlocked,
-}: {
-  atOrAboveMax: boolean;
-  billingBlocked: boolean;
-}) {
-  return (
-    <Card
-      className={
-        atOrAboveMax
-          ? "border-primary/40 bg-primary/5"
-          : "border-dashed"
-      }
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{PARTNER_PROGRAM.name}</CardTitle>
-        <CardDescription>{PARTNER_PROGRAM.description}</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-        <p>
-          {atOrAboveMax
-            ? `Need more than ${COMMUNITY_QUANTITY_HARD_MAX} communities? Let's talk.`
-            : PARTNER_PROGRAM.priceNote}
-        </p>
-        <span className="max-w-md text-xs text-muted-foreground">
-          {billingBlocked
-            ? "Billing is temporarily unavailable."
-            : "Contact us for Partner pricing."}
-        </span>
-      </CardContent>
     </Card>
   );
 }
