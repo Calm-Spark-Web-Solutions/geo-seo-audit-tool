@@ -1,8 +1,16 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Pin Turbopack root so HMR resolves node_modules/next from this app (not a
+  // parent directory). Fixes intermittent "Next.js package not found" panics
+  // during dev — see https://github.com/vercel/next.js/issues/76028
+  turbopack: {
+    root: path.resolve(process.cwd()),
+  },
+
   // @react-pdf/renderer relies on Node-only deps (yoga-layout, fontkit, …)
   // and bundling it through Turbopack at request time produces
   // "ba.Component is not a constructor" errors. Marking it external pins it

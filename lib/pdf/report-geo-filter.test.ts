@@ -66,3 +66,38 @@ describe("checksForPdfVariant geo PDF omissions", () => {
     ]);
   });
 });
+
+describe("checksForPdfVariant SEO PDF AI omissions", () => {
+  it("drops AI subscores and AI bot site-wide checks from SEO PDFs", () => {
+    const input = [
+      check("title_length", "SEO"),
+      check("ai_eeat", "GEO"),
+      check("sitewide_ai_bot_access", "SEO"),
+    ];
+    expect(checksForPdfVariant(input, "seo").map((c) => c.key)).toEqual([
+      "title_length",
+    ]);
+  });
+
+  it("includes AI bot site-wide and ai_* checks on GEO PDFs", () => {
+    const input = [
+      check("faq_present", "GEO"),
+      check("ai_eeat", "GEO"),
+      check("sitewide_ai_bot_access", "SEO"),
+      check("psi_performance", "GEO"),
+    ];
+    expect(checksForPdfVariant(input, "geo").map((c) => c.key).sort()).toEqual(
+      ["ai_eeat", "faq_present", "sitewide_ai_bot_access"],
+    );
+  });
+
+  it("includes AI checks on full PDFs", () => {
+    const input = [
+      check("ai_scannability", "GEO"),
+      check("sitewide_ai_bot_access", "SEO"),
+    ];
+    expect(checksForPdfVariant(input, "full").map((c) => c.key).sort()).toEqual(
+      ["ai_scannability", "sitewide_ai_bot_access"],
+    );
+  });
+});

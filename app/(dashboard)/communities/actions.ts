@@ -11,6 +11,7 @@ import { consumeRateLimit } from "@/lib/ratelimit";
 import { createClient } from "@/lib/supabase/server";
 import { loadManualGoogleCoverageForCommunity } from "@/lib/checklists/load-manual-google-coverage";
 import { isManualItemReplacedByGoogle } from "@/lib/checklists/manual-google-coverage";
+import { resolveCanonicalWebsiteUrl } from "@/lib/crawler/resolve-website-url";
 import {
   ALLOWED_COMMUNITY_MANUAL_KEYS,
   sanitizeCommunityManualResults,
@@ -121,6 +122,15 @@ export async function createCommunity(
     return { ok: false, error: "Please fix the errors below.", fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
+  const resolved = await resolveCanonicalWebsiteUrl(parsed.data.website_url);
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      error: resolved.error,
+      fieldErrors: { website_url: resolved.error },
+    };
+  }
+
   const supabase = await createClient();
   // Defense-in-depth getUser; see companies/actions.ts comment.
   const { data: { user } } = await supabase.auth.getUser();
@@ -150,7 +160,7 @@ export async function createCommunity(
 
   const { data, error } = await supabase
     .from("communities")
-    .insert({ ...parsed.data, company_id: companyId })
+    .insert({ ...parsed.data, website_url: resolved.url, company_id: companyId })
     .select("id")
     .single();
 
@@ -176,6 +186,15 @@ export async function updateCommunity(
     return { ok: false, error: "Please fix the errors below.", fieldErrors: fieldErrorsFrom(parsed.error) };
   }
 
+  const resolved = await resolveCanonicalWebsiteUrl(parsed.data.website_url);
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      error: resolved.error,
+      fieldErrors: { website_url: resolved.error },
+    };
+  }
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "You must be signed in." };
@@ -196,7 +215,7 @@ export async function updateCommunity(
 
   const { error } = await supabase
     .from("communities")
-    .update(parsed.data)
+    .update({ ...parsed.data, website_url: resolved.url })
     .eq("id", id);
 
   if (error) return { ok: false, error: error.message };

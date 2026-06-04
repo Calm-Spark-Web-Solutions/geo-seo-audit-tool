@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dedupeSitemapShardUrls,
   isAssetUrl,
   normalizeUrl,
   originOf,
   preferTrailingSlashFetchUrl,
   sameAuditSiteOrigin,
   sameOrigin,
+  sitemapShardPathKey,
 } from "./normalize";
 
 describe("normalizeUrl", () => {
@@ -151,5 +153,21 @@ describe("originOf", () => {
   it("returns the origin or null for invalid input", () => {
     expect(originOf("https://example.com/path")).toBe("https://example.com");
     expect(originOf("not a url")).toBeNull();
+  });
+});
+
+describe("dedupeSitemapShardUrls", () => {
+  it("collapses http and https shard files to a single https URL", () => {
+    const out = dedupeSitemapShardUrls([
+      "http://parkvista.net/page-sitemap.xml",
+      "https://parkvista.net/page-sitemap.xml",
+    ]);
+    expect(out).toEqual(["https://parkvista.net/page-sitemap.xml"]);
+  });
+
+  it("uses stable path keys regardless of scheme", () => {
+    expect(sitemapShardPathKey("http://example.com/page-sitemap.xml")).toBe(
+      sitemapShardPathKey("https://www.example.com/page-sitemap.xml"),
+    );
   });
 });

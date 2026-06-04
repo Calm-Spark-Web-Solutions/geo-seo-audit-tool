@@ -7,6 +7,8 @@ import {
   DEFAULT_CRAWL_TIMEOUT_MS,
   DEFAULT_USER_AGENT,
   MAX_PAGES,
+  alignShardUrlToBaseOrigin,
+  dedupeSitemapShardUrls,
   isAssetUrl,
   normalizeUrl,
   originOf,
@@ -126,9 +128,10 @@ export async function fetchSitemapShards(
 
   if (leafShards.size === 0) return [];
 
-  // Fetch leaves in parallel (bounded). Each leaf is a `urlset` xml; we
-  // walk the entries in-process to build the shard summary.
-  const leafUrls = Array.from(leafShards);
+  const canonicalBase = normalizeUrl(baseUrl) ?? baseUrl;
+  const leafUrls = dedupeSitemapShardUrls(Array.from(leafShards)).map((url) =>
+    alignShardUrlToBaseOrigin(url, canonicalBase),
+  );
   const leafXmls = await mapWithConcurrency(leafUrls, SITEMAP_CONCURRENCY, (u) =>
     safeFetch(u, settings),
   );

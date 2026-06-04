@@ -333,6 +333,8 @@ export async function generatePageAnalysis(
         result: resultFromScore(score),
         explanation: `${s.explanation} Model score: ${score}/100.`,
         score,
+        category: "AI analysis",
+        pillar: "GEO",
         ...(guidanceLines.length > 0
           ? {
               evidence: {

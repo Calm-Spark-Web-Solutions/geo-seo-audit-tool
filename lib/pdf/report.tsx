@@ -1111,10 +1111,23 @@ const PDF_OMIT_DEPRECATED_CHECK_KEYS = new Set<string>(["images_with_captions"])
  */
 const GEO_PDF_OMIT_CHECK_KEYS = new Set<string>(["internal_link_health"]);
 
+/** SEO-pillar checks that belong on GEO / full PDFs only (AI crawler policy). */
+const GEO_PDF_INCLUDE_SEO_PILLAR_KEYS = new Set<string>([
+  "sitewide_ai_bot_access",
+]);
+
+const SEO_PDF_OMIT_CHECK_KEYS = new Set(["sitewide_ai_bot_access"]);
+
 function isOmittedFromGeoPdfCheck(check: AuditCheck): boolean {
   if (GEO_PDF_OMIT_CHECK_KEYS.has(check.key)) return true;
   if (check.key.startsWith("psi_")) return true;
   if (check.key.startsWith("crux_")) return true;
+  return false;
+}
+
+function isOmittedFromSeoPdfCheck(check: AuditCheck): boolean {
+  if (SEO_PDF_OMIT_CHECK_KEYS.has(check.key)) return true;
+  if (check.key.startsWith("ai_")) return true;
   return false;
 }
 
@@ -1126,9 +1139,17 @@ export function checksForPdfVariant(
   variant: PdfReportVariant,
 ): AuditCheck[] {
   let out: AuditCheck[];
-  if (variant === "full") out = checks;
-  else if (variant === "seo") out = checks.filter((c) => c.pillar !== "GEO");
-  else out = checks.filter((c) => c.pillar !== "SEO");
+  if (variant === "full") {
+    out = checks;
+  } else if (variant === "seo") {
+    out = checks.filter((c) => c.pillar !== "GEO");
+    out = out.filter((c) => !isOmittedFromSeoPdfCheck(c));
+  } else {
+    out = checks.filter(
+      (c) =>
+        c.pillar !== "SEO" || GEO_PDF_INCLUDE_SEO_PILLAR_KEYS.has(c.key),
+    );
+  }
 
   out = out.filter((c) => !PDF_OMIT_DEPRECATED_CHECK_KEYS.has(c.key));
   if (variant === "geo") {
@@ -1457,8 +1478,11 @@ export function AuditReportPdfDocument({
             {filteredSiteWide.length > 0 ? (
               <BulletLine>
                 {filteredSiteWide.length} site-wide prob
-                {filteredSiteWide.length === 1 ? "e" : "es"} (robots.txt,
-                sitemap, AI bot rules).
+                {filteredSiteWide.length === 1 ? "e" : "es"} (
+                {variant === "seo"
+                  ? "robots.txt and sitemap"
+                  : "robots.txt, sitemap, AI bot rules"}
+                ).
               </BulletLine>
             ) : null}
             {filteredCrux.length > 0 ? (
@@ -1523,8 +1547,9 @@ export function AuditReportPdfDocument({
               <View style={styles.cardWrap} wrap>
                 <Text style={styles.cardTitle}>Crawl signals</Text>
                 <Text style={styles.cardDescription}>
-                  robots.txt, AI bot directives, and sitemap discovery.
-                  Failures here usually affect the entire site.
+                  {variant === "seo"
+                    ? "robots.txt and sitemap discovery. Failures here usually affect the entire site."
+                    : "robots.txt, AI bot directives, and sitemap discovery. Failures here usually affect the entire site."}
                 </Text>
                 <ChecksTable checks={filteredSiteWide} hidePass={false} />
               </View>
@@ -1718,7 +1743,11 @@ export function AuditReportPdfDocument({
           ) : null}
           <GlossaryItem
             term="Site-wide probe"
-            definition="An origin-level signal (robots.txt, sitemap discovery, AI bot rules) that applies to every URL on the site rather than a single page."
+            definition={
+              variant === "seo"
+                ? "An origin-level signal (robots.txt, sitemap discovery) that applies to every URL on the site rather than a single page."
+                : "An origin-level signal (robots.txt, sitemap discovery, AI bot rules) that applies to every URL on the site rather than a single page."
+            }
           />
           {variant === "full" || variant === "seo" ? (
             <GlossaryItem

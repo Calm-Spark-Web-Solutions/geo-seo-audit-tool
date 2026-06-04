@@ -109,3 +109,54 @@ export function originOf(input: string): string | null {
     return null;
   }
 }
+
+/** Stable identity for a sitemap shard file (ignores http/https and www). */
+export function sitemapShardPathKey(url: string): string | null {
+  const norm = normalizeUrl(url);
+  if (!norm) return null;
+  const u = new URL(norm);
+  const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+  return `${host}${u.pathname}`;
+}
+
+/** Prefer https when deduping two URLs for the same sitemap shard. */
+export function preferHttpsUrl(a: string, b: string): string {
+  if (a.startsWith("https:")) return a;
+  if (b.startsWith("https:")) return b;
+  return a;
+}
+
+/** Drop duplicate shard files discovered as both http and https. */
+export function dedupeSitemapShardUrls(urls: string[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const url of urls) {
+    const key = sitemapShardPathKey(url);
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, url);
+      continue;
+    }
+    byKey.set(key, preferHttpsUrl(url, existing));
+  }
+  return Array.from(byKey.values());
+}
+
+/** Align a shard URL to the community's stored scheme/host when same site. */
+export function alignShardUrlToBaseOrigin(
+  shardUrl: string,
+  baseUrl: string,
+): string {
+  const shardNorm = normalizeUrl(shardUrl);
+  const baseNorm = normalizeUrl(baseUrl);
+  if (!shardNorm || !baseNorm || !sameAuditSiteOrigin(shardNorm, baseNorm)) {
+    return shardNorm ?? shardUrl;
+  }
+
+  const shard = new URL(shardNorm);
+  const base = new URL(baseNorm);
+  shard.protocol = base.protocol;
+  shard.hostname = base.hostname;
+  shard.port = base.port;
+  return normalizeUrl(shard.toString()) ?? shard.toString();
+}

@@ -43,7 +43,12 @@ export function CommunityForm({ companyId, initial }: Props) {
         />
       </Field>
 
-      <Field label="Website URL" htmlFor="website_url" error={state.fieldErrors?.website_url}>
+      <Field
+        label="Website URL"
+        htmlFor="website_url"
+        error={state.fieldErrors?.website_url}
+        hint="We probe http and https and save whichever canonical URL responds (https preferred)."
+      >
         <Input
           id="website_url"
           name="website_url"
